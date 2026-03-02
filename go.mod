@@ -1,6 +1,6 @@
-module github.com/ameshkov/dnscrypt/v2
+module github.com/AdguardTeam/dnscrypt
 
-go 1.24.1
+go 1.25.7
 
 require (
 	github.com/AdguardTeam/golibs v0.32.7
@@ -22,3 +22,4 @@ require (
 	golang.org/x/sys v0.32.0 // indirect
 	golang.org/x/tools v0.31.0 // indirect
 )
+

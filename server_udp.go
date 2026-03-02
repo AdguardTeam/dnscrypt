@@ -80,7 +80,6 @@ func (s *Server) ServeUDP(l *net.UDPConn) error {
 
 	for s.isStarted() {
 		b, sess, err := s.readUDPMsg(l)
-
 		// Check the error code and exit loop if necessary
 		if err != nil {
 			if !s.isStarted() {

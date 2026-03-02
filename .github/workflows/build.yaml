@@ -11,8 +11,6 @@ name: Build
 jobs:
   tests:
     runs-on: ${{ matrix.os }}
-    env:
-      GO111MODULE: "on"
     strategy:
       matrix:
         os:
@@ -42,8 +40,6 @@ jobs:
     needs:
       - tests
     runs-on: ubuntu-latest
-    env:
-      GO111MODULE: "on"
     steps:
       - uses: actions/checkout@master
 

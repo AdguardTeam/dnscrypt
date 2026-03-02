@@ -16,13 +16,13 @@ endif
 default: build
 
 build: clean test
-	go build -ldflags "-X main.VersionString=$(VERSION)" -o $(NAME)$(ext) ./cmd
+	go build -ldflags "-X main.VersionString=$(VERSION)" -o $(NAME)$(ext) ./cmd/dnscrypt
 
 release: check-env-release
 	mkdir -p $(BUILDDIR)
 	cp LICENSE $(BUILDDIR)/
 	cp README.md $(BUILDDIR)/
-	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -ldflags "-X main.VersionString=$(VERSION)" -o $(BUILDDIR)/$(NAME)$(ext) ./cmd/
+	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -ldflags "-X main.VersionString=$(VERSION)" -o $(BUILDDIR)/$(NAME)$(ext) ./cmd/dnscrypt
 	cd $(BASE_BUILDDIR) ; $(archiveCmd)
 
 test:

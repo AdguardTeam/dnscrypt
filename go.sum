@@ -1,5 +1,7 @@
 github.com/AdguardTeam/golibs v0.32.7 h1:3dmGlAVgmvquCCwHsvEl58KKcRAK3z1UnjMnwSIeDH4=
 github.com/AdguardTeam/golibs v0.32.7/go.mod h1:bE8KV1zqTzgZjmjFyBJ9f9O5DEKO717r7e57j1HclJA=
+github.com/ameshkov/dnscrypt/v2 v2.4.0 h1:if6ZG2cuQmcP2TwSY+D0+8+xbPfoatufGlOQTMNkI9o=
+github.com/ameshkov/dnscrypt/v2 v2.4.0/go.mod h1:WpEFV2uhebXb8Jhes/5/fSdpmhGV8TL22RDaeWwV6hI=
 github.com/ameshkov/dnsstamps v1.0.3 h1:Srzik+J9mivH1alRACTbys2xOxs0lRH9qnTA7Y1OYVo=
 github.com/ameshkov/dnsstamps v1.0.3/go.mod h1:Ii3eUu73dx4Vw5O4wjzmT5+lkCwovjzaEZZ4gKyIH5A=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=

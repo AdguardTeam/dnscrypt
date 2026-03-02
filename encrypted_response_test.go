@@ -5,7 +5,7 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/ameshkov/dnscrypt/v2/xsecretbox"
+	"github.com/AdguardTeam/dnscrypt/xsecretbox"
 	"github.com/stretchr/testify/require"
 )
 
