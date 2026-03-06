@@ -2,13 +2,13 @@ package dnscrypt
 
 import (
 	"bytes"
-	"errors"
 	"log/slog"
 	"net"
 	"runtime"
 	"sync"
 	"time"
 
+	"github.com/AdguardTeam/golibs/errors"
 	"github.com/AdguardTeam/golibs/logutil/slogutil"
 	"github.com/miekg/dns"
 	"golang.org/x/net/ipv4"
@@ -21,10 +21,10 @@ type encryptionFunc func(m *dns.Msg, q EncryptedQuery) ([]byte, error)
 type UDPResponseWriter struct {
 	udpConn *net.UDPConn    // UDP connection
 	sess    *dns.SessionUDP // SessionUDP (necessary to use dns.WriteToSessionUDP)
-	encrypt encryptionFunc  // DNSCrypt encryption function
-	req     *dns.Msg        // DNS query that was processed
-	query   EncryptedQuery  // DNSCrypt query properties
 	logger  *slog.Logger
+	req     *dns.Msg       // DNS query that was processed
+	encrypt encryptionFunc // DNSCrypt encryption function
+	query   EncryptedQuery // DNSCrypt query properties
 }
 
 // type check
@@ -50,7 +50,9 @@ func (w *UDPResponseWriter) WriteMsg(m *dns.Msg) error {
 
 		return err
 	}
+
 	_, err = dns.WriteToSessionUDP(w.udpConn, res, w.sess)
+
 	return err
 }
 
@@ -79,23 +81,28 @@ func (s *Server) ServeUDP(l *net.UDPConn) error {
 	}
 
 	for s.isStarted() {
-		b, sess, err := s.readUDPMsg(l)
+		var b []byte
+		var sess *dns.SessionUDP
+		b, sess, err = s.readUDPMsg(l)
 		// Check the error code and exit loop if necessary
 		if err != nil {
 			if !s.isStarted() {
 				// Stopped gracefully
 				return nil
 			}
+
 			var netErr net.Error
 			if errors.As(err, &netErr) && netErr.Timeout() {
 				// Note that timeout errors will be here (i.e. hitting ReadDeadline)
 				continue
 			}
+
 			if isConnClosed(err) {
 				s.logger().Info("UDP listener closed, exiting loop")
 			} else {
 				s.logger().Info("got error when reading from UDP", slogutil.KeyError, err)
 			}
+
 			return err
 		}
 
@@ -140,6 +147,7 @@ func (s *Server) prepareServeUDP(l *net.UDPConn) (err error) {
 
 	// Track an active UDP listener
 	s.udpListeners[l] = struct{}{}
+
 	return err
 }
 
@@ -179,6 +187,7 @@ func (s *Server) serveUDPMsg(b []byte, certTxt string, sess *dns.SessionUDP, l *
 		if err != nil {
 			s.logger().Debug("failed to process a plain DNS query", slogutil.KeyError, err)
 		}
+
 		if err == nil {
 			// Ignore errors, we don't care and can't handle them anyway
 			_, _ = dns.WriteToSessionUDP(l, reply, sess)
@@ -228,5 +237,6 @@ func setUDPSocketOptions(conn *net.UDPConn) error {
 	if err6 != nil && err4 != nil {
 		return err4
 	}
+
 	return nil
 }

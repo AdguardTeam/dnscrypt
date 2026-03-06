@@ -65,6 +65,7 @@ func (rc *ResolverConfig) CreateCert() (*Cert, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	// short-term private key
 	resolverSk, err := HexDecodeKey(rc.ResolverSk)
 	if err != nil {
@@ -107,6 +108,7 @@ func (rc *ResolverConfig) CreateStamp(addr string) (dnsstamps.ServerStamp, error
 
 	stamp.ServerPk = serverPk
 	stamp.ServerAddrStr = addr
+
 	return stamp, nil
 }
 
@@ -137,6 +139,7 @@ func GenerateResolverConfig(providerName string, privateKey ed25519.PrivateKey) 
 	resolverSk, resolverPk := generateRandomKeyPair()
 	rc.ResolverSk = HexEncodeKey(resolverSk[:])
 	rc.ResolverPk = HexEncodeKey(resolverPk[:])
+
 	return rc, nil
 }
 
@@ -152,11 +155,12 @@ func HexDecodeKey(str string) ([]byte, error) {
 }
 
 // generateRandomKeyPair generates a random key-pair
-func generateRandomKeyPair() (privateKey [keySize]byte, publicKey [keySize]byte) {
+func generateRandomKeyPair() (privateKey, publicKey [keySize]byte) {
 	privateKey = [keySize]byte{}
 	publicKey = [keySize]byte{}
 
 	_, _ = rand.Read(privateKey[:])
 	curve25519.ScalarBaseMult(&publicKey, &privateKey)
-	return
+
+	return privateKey, publicKey
 }

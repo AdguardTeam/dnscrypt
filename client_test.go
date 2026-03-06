@@ -155,7 +155,7 @@ func TestExchangePublicResolvers(t *testing.T) {
 	}
 }
 
-func checkDNSCryptServer(t *testing.T, stampStr string, network string) {
+func checkDNSCryptServer(t *testing.T, stampStr, network string) {
 	client := Client{Net: network, Timeout: 10 * time.Second}
 	resolverInfo, err := client.Dial(stampStr)
 	require.NoError(t, err)

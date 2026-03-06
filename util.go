@@ -77,18 +77,21 @@ func unpad(packet []byte) ([]byte, error) {
 }
 
 // computeSharedKey - computes a shared key
-func computeSharedKey(cryptoConstruction CryptoConstruction, secretKey *[keySize]byte, publicKey *[keySize]byte) ([keySize]byte, error) {
+func computeSharedKey(cryptoConstruction CryptoConstruction, secretKey, publicKey *[keySize]byte) ([keySize]byte, error) {
 	if cryptoConstruction == XChacha20Poly1305 {
 		sharedKey, err := xsecretbox.SharedKey(*secretKey, *publicKey)
 		if err != nil {
 			return sharedKey, err
 		}
+
 		return sharedKey, nil
 	} else if cryptoConstruction == XSalsa20Poly1305 {
 		sharedKey := [sharedKeySize]byte{}
 		box.Precompute(&sharedKey, publicKey, secretKey)
+
 		return sharedKey, nil
 	}
+
 	return [keySize]byte{}, ErrEsVersion
 }
 
@@ -128,6 +131,7 @@ func escapeByte(b byte) string {
 	}
 
 	b -= '~' + 1
+
 	// The cast here is needed as b*4 may overflow byte.
 	return escapedByteLarge[int(b)*4 : int(b)*4+4]
 }
@@ -147,10 +151,11 @@ func packTxtString(buf []byte) string {
 			out.WriteByte(b)
 		}
 	}
+
 	return out.String()
 }
 
-func unpackTxtString(s string) ([]byte, error) {
+func unpackTxtString(s string) []byte {
 	bs := make([]byte, len(s))
 	msg := make([]byte, 0)
 	copy(bs, s)
@@ -160,6 +165,7 @@ func unpackTxtString(s string) ([]byte, error) {
 			if i == len(bs) {
 				break
 			}
+
 			if i+2 < len(bs) && isDigit(bs[i]) && isDigit(bs[i+1]) && isDigit(bs[i+2]) {
 				msg = append(msg, dddToByte(bs[i:]))
 				i += 2
@@ -176,11 +182,11 @@ func unpackTxtString(s string) ([]byte, error) {
 			msg = append(msg, bs[i])
 		}
 	}
-	return msg, nil
+	return msg
 }
 
 // normalize truncates the DNS response if needed depending on the protocol
-func normalize(proto string, req *dns.Msg, res *dns.Msg) {
+func normalize(proto string, req, res *dns.Msg) {
 	size := dnsSize(proto, req)
 	// DNSCrypt encryption adds a header to each message, we should
 	// consider this when truncating a message.
@@ -225,6 +231,7 @@ func readPrefixed(conn net.Conn) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	packetLen := binary.BigEndian.Uint16(l)
 	if packetLen > dns.MaxMsgSize {
 		return nil, ErrQueryTooLarge
@@ -235,6 +242,7 @@ func readPrefixed(conn net.Conn) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return buf, nil
 }
 
@@ -244,6 +252,7 @@ func writePrefixed(b []byte, conn net.Conn) error {
 	l := make([]byte, 2)
 	binary.BigEndian.PutUint16(l, uint16(len(b)))
 	_, err := (&net.Buffers{l, b}).WriteTo(conn)
+
 	return err
 }
 
@@ -252,6 +261,7 @@ func isConnClosed(err error) bool {
 	if err == nil {
 		return false
 	}
+
 	nerr, ok := err.(*net.OpError)
 	if !ok {
 		return false

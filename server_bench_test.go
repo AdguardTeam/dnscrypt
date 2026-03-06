@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ameshkov/dnsstamps"
+	"github.com/miekg/dns"
 	"github.com/stretchr/testify/require"
 )
 
@@ -48,13 +49,14 @@ func benchmarkServe(b *testing.B, network string) {
 	conn, err := net.Dial(network, stamp.ServerAddrStr)
 	require.NoError(b, err)
 
-	b.ResetTimer()
+	var resp *dns.Msg
+
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		m := createTestMessage()
-		res, err := client.ExchangeConn(conn, m, ri)
+
+		resp, err = client.ExchangeConn(conn, m, ri)
 		require.NoError(b, err)
-		assertTestMessageResponse(b, res)
+		assertTestMessageResponse(b, resp)
 	}
-	b.StopTimer()
 }

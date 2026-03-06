@@ -24,7 +24,8 @@ func TestPadUnpad(t *testing.T) {
 		padded := pad(test.packet)
 		assert.Equal(t, test.expPaddedLen, len(padded), "test %d", i)
 
-		unpadded, err := unpad(padded)
+		var unpadded []byte
+		unpadded, err = unpad(padded)
 		assert.Nil(t, err, "test %d", i)
 		assert.Equal(t, test.packet, unpadded, "test %d", i)
 	}

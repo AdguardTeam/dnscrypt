@@ -52,34 +52,33 @@ type ServerDNSCrypt interface {
 
 // Server is a simple DNSCrypt server implementation
 type Server struct {
-	// ProviderName is a DNSCrypt provider name
-	ProviderName string
+	// Handler to invoke. If nil, uses DefaultHandler.
+	Handler Handler
 
 	// ResolverCert contains resolver certificate.
 	ResolverCert *Cert
-
-	// UDPSize is the default buffer size to use to read incoming UDP messages.
-	// If not set it defaults to defaultUDPSize (1252 B).
-	UDPSize int
-
-	// Handler to invoke. If nil, uses DefaultHandler.
-	Handler Handler
 
 	// Logger is a logger instance for Server. If not set, slog.Default() will
 	// be used.
 	Logger *slog.Logger
 
-	// make sure init is called only once
-	initOnce sync.Once
-
-	// Shutdown handling
-	// --
-	lock         sync.RWMutex // protects access to all the fields below
-	started      bool
-	wg           sync.WaitGroup            // active workers (servers)
 	tcpListeners map[net.Listener]struct{} // track active TCP listeners
 	udpListeners map[*net.UDPConn]struct{} // track active UDP listeners
 	tcpConns     map[net.Conn]struct{}     // track active connections
+
+	// ProviderName is a DNSCrypt provider name
+	ProviderName string
+
+	wg sync.WaitGroup // active workers (servers)
+	// UDPSize is the default buffer size to use to read incoming UDP messages.
+	// If not set it defaults to defaultUDPSize (1252 B).
+	UDPSize int
+	lock    sync.RWMutex // protects access to all the fields below
+
+	// make sure init is called only once
+	initOnce sync.Once
+
+	started bool
 }
 
 // type check
@@ -189,6 +188,7 @@ func (s *Server) isStarted() bool {
 	s.lock.RLock()
 	started := s.started
 	s.lock.RUnlock()
+
 	return started
 }
 
@@ -298,6 +298,7 @@ func (s *Server) handleHandshake(b []byte, certTxt string) ([]byte, error) {
 	// These bits are important for the old dnscrypt-proxy versions
 	reply.Authoritative = true
 	reply.RecursionAvailable = true
+
 	return reply.Pack()
 }
 
@@ -324,6 +325,8 @@ func (s *Server) getCertTXT() (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	certTxt := packTxtString(certBuf)
+
 	return certTxt, nil
 }

@@ -1,43 +1,89 @@
-NAME=dnscrypt
-BASE_BUILDDIR=build
-BUILDNAME=$(GOOS)-$(GOARCH)$(GOARM)
-BUILDDIR=$(BASE_BUILDDIR)/$(BUILDNAME)
-VERSION?=dev
+# Keep the Makefile POSIX-compliant.  We currently allow hyphens in target
+# names, but that may change in the future.
+#
+# See https://pubs.opengroup.org/onlinepubs/9799919799/utilities/make.html.
+.POSIX:
 
-ifeq ($(GOOS),windows)
-  ext=.exe
-  archiveCmd=zip -9 -r $(NAME)-$(BUILDNAME)-$(VERSION).zip $(BUILDNAME)
-else
-  ext=
-  archiveCmd=tar czpvf $(NAME)-$(BUILDNAME)-$(VERSION).tar.gz $(BUILDNAME)
-endif
+# This comment is used to simplify checking local copies of the Makefile.  Bump
+# this number every time a significant change is made to this Makefile.
+#
+# AdGuard-Project-Version: 13
 
-.PHONY: default
-default: build
+# Don't name these macros "GO" etc., because GNU Make apparently makes them
+# exported environment variables with the literal value of "${GO:-go}" and so
+# on, which is not what we need.  Use a dot in the name to make sure that users
+# don't have an environment variable with the same name.
+#
+# See https://unix.stackexchange.com/q/646255/105635.
+GO.MACRO = $${GO:-go}
+VERBOSE.MACRO = $${VERBOSE:-0}
 
-build: clean test
-	go build -ldflags "-X main.VersionString=$(VERSION)" -o $(NAME)$(ext) ./cmd/dnscrypt
+BRANCH = $${BRANCH:-$$(git rev-parse --abbrev-ref HEAD)}
+GOAMD64 = v1
+GOPROXY = https://proxy.golang.org|direct
+GOTELEMETRY = off
+GOTOOLCHAIN = go1.25.7
+RACE = 0
+REVISION = $${REVISION:-$$(git rev-parse --short HEAD)}
+VERSION = 0
 
-release: check-env-release
-	mkdir -p $(BUILDDIR)
-	cp LICENSE $(BUILDDIR)/
-	cp README.md $(BUILDDIR)/
-	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -ldflags "-X main.VersionString=$(VERSION)" -o $(BUILDDIR)/$(NAME)$(ext) ./cmd/dnscrypt
-	cd $(BASE_BUILDDIR) ; $(archiveCmd)
+# TODO(f.setrakov): Remove the bin directory from the paths, as it is no longer
+# needed.
+ENV = env \
+	BRANCH="$(BRANCH)" \
+	GO="$(GO.MACRO)" \
+	GOAMD64='$(GOAMD64)' \
+	GOPROXY='$(GOPROXY)' \
+	GOTELEMETRY='$(GOTELEMETRY)' \
+	GOTOOLCHAIN='$(GOTOOLCHAIN)' \
+	PATH="$${PWD}/bin:$$("$(GO.MACRO)" env GOPATH)/bin:$${PATH}" \
+	RACE='$(RACE)' \
+	REVISION="$(REVISION)" \
+	VERBOSE="$(VERBOSE.MACRO)" \
+	VERSION="$(VERSION)" \
 
-test:
-	go test -race -v -bench=. ./...
+# Keep the line above blank.
 
-clean:
-	go clean
-	rm -rf $(BASE_BUILDDIR)
+ENV_MISC = env \
+	PATH="$${PWD}/bin:$$("$(GO.MACRO)" env GOPATH)/bin:$${PATH}" \
+	VERBOSE="$(VERBOSE.MACRO)" \
 
-check-env-release:
-	@ if [ "$(GOOS)" = "" ]; then \
-		echo "Environment variable GOOS not set"; \
-		exit 1; \
-	fi
-	@ if [ "$(GOARCH)" = "" ]; then \
-		echo "Environment variable GOOS not set"; \
-		exit 1; \
-	fi
+# Keep the line above blank.
+
+# TODO(f.setrakov): Once the new cmd has been implemented, add the build.sh
+# file and the relevant target.
+
+# Keep this target first, so that a naked make invocation triggers a
+# check
+.PHONY: check
+check: go-deps go-lint test
+
+.PHONY: init
+init: ; git config core.hooksPath ./scripts/hooks
+
+.PHONY: test
+test: go-test
+
+.PHONY: go-deps go-env go-lint go-test go-upd-tools
+go-deps:      ; $(ENV)          "$(SHELL)" ./scripts/make/go-deps.sh
+go-env:       ; $(ENV)          "$(GO.MACRO)" env
+go-lint:      ; $(ENV)          "$(SHELL)" ./scripts/make/go-lint.sh
+go-test:      ; $(ENV) RACE='1' "$(SHELL)" ./scripts/make/go-test.sh
+go-upd-tools: ; $(ENV)          "$(SHELL)" ./scripts/make/go-upd-tools.sh
+
+.PHONY: go-check
+go-check: go-lint go-test
+
+# A quick check to make sure that all operating systems relevant to the
+# development of the project can be typechecked and built successfully.
+.PHONY: go-os-check
+go-os-check:
+	$(ENV) GOOS='darwin' "$(GO.MACRO)" vet ./...
+	$(ENV) GOOS='linux'  "$(GO.MACRO)" vet ./...
+
+.PHONY: txt-lint
+txt-lint: ; $(ENV) "$(SHELL)" ./scripts/make/txt-lint.sh
+
+.PHONY: md-lint sh-lint
+md-lint: ; $(ENV_MISC) "$(SHELL)" ./scripts/make/md-lint.sh
+sh-lint: ; $(ENV_MISC) "$(SHELL)" ./scripts/make/sh-lint.sh

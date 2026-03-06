@@ -43,7 +43,7 @@ func TestCertDeserialize(t *testing.T) {
 	certBytes, err := os.ReadFile("testdata/dnscrypt-cert.opendns.txt")
 	require.NoError(t, err)
 
-	b, err := unpackTxtString(string(certBytes))
+	b := unpackTxtString(string(certBytes))
 	require.NoError(t, err)
 
 	cert := &Cert{}

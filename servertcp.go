@@ -2,12 +2,13 @@ package dnscrypt
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"sync"
 	"time"
+
+	"github.com/AdguardTeam/golibs/errors"
 
 	"github.com/AdguardTeam/golibs/logutil/slogutil"
 	"github.com/miekg/dns"
@@ -16,10 +17,10 @@ import (
 // TCPResponseWriter is the ResponseWriter implementation for TCP
 type TCPResponseWriter struct {
 	tcpConn net.Conn
-	encrypt encryptionFunc
-	req     *dns.Msg
-	query   EncryptedQuery
 	logger  *slog.Logger
+	req     *dns.Msg
+	encrypt encryptionFunc
+	query   EncryptedQuery
 }
 
 // type check
@@ -74,24 +75,27 @@ func (s *Server) ServeTCP(l net.Listener) error {
 	}
 
 	for s.isStarted() {
-		conn, err := l.Accept()
-
+		var conn net.Conn
+		conn, err = l.Accept()
 		// Check the error code and exit loop if necessary
 		if err != nil {
 			if !s.isStarted() {
 				// Stopped gracefully
 				break
 			}
+
 			var netErr net.Error
 			if errors.As(err, &netErr) && netErr.Timeout() {
 				// Note that timeout errors will be here (i.e. hitting ReadDeadline)
 				continue
 			}
+
 			if isConnClosed(err) {
 				s.logger().Info("TCP listener closed, exiting loop")
 			} else {
 				s.logger().Info("got error when reading from UDP listen", slogutil.KeyError, err)
 			}
+
 			break
 		}
 
@@ -137,6 +141,7 @@ func (s *Server) prepareServeTCP(l net.Listener) (err error) {
 
 	// Track an active TCP listener
 	s.tcpListeners[l] = struct{}{}
+
 	return nil
 }
 
@@ -170,10 +175,12 @@ func (s *Server) handleTCPMsg(b []byte, conn net.Conn, certTxt string) error {
 		if err != nil {
 			return fmt.Errorf("failed to process a plain DNS query: %w", err)
 		}
+
 		err = writePrefixed(reply, conn)
 		if err != nil {
 			return fmt.Errorf("failed to write a response: %w", err)
 		}
+
 		return nil
 	}
 
@@ -183,6 +190,7 @@ func (s *Server) handleTCPMsg(b []byte, conn net.Conn, certTxt string) error {
 	if err != nil {
 		return fmt.Errorf("failed to decrypt incoming message: %w", err)
 	}
+
 	rw := &TCPResponseWriter{
 		tcpConn: conn,
 		encrypt: s.encrypt,
@@ -190,6 +198,7 @@ func (s *Server) handleTCPMsg(b []byte, conn net.Conn, certTxt string) error {
 		query:   q,
 		logger:  s.logger(),
 	}
+
 	err = s.serveDNS(rw, m)
 	if err != nil {
 		return fmt.Errorf("failed to process a DNS query: %w", err)
@@ -198,15 +207,16 @@ func (s *Server) handleTCPMsg(b []byte, conn net.Conn, certTxt string) error {
 	return nil
 }
 
-// handleTCPConnection handles all queries that are coming to the
-// specified TCP connection.
-func (s *Server) handleTCPConnection(conn net.Conn, certTxt string) error {
+// handleTCPConnection handles all queries that are coming to the specified TCP
+// connection.
+func (s *Server) handleTCPConnection(conn net.Conn, certTxt string) (err error) {
 	timeout := defaultReadTimeout
 
 	for s.isStarted() {
 		_ = conn.SetReadDeadline(time.Now().Add(timeout))
 
-		b, err := readPrefixed(conn)
+		var b []byte
+		b, err = readPrefixed(conn)
 		if err != nil {
 			return err
 		}

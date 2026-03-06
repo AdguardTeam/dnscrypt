@@ -200,22 +200,25 @@ func testThisServerRespondMessages(t *testing.T, network string, srv *testServer
 	require.NoError(t, err)
 	require.NotNil(t, ri)
 
-	conn, err := net.Dial(network, stamp.ServerAddrStr)
+	var conn net.Conn
+	conn, err = net.Dial(network, stamp.ServerAddrStr)
 	require.NoError(t, err)
 
 	for i := 0; i < 10; i++ {
 		m := createTestMessage()
-		res, err := client.ExchangeConn(conn, m, ri)
+
+		var res *dns.Msg
+		res, err = client.ExchangeConn(conn, m, ri)
 		require.NoError(t, err)
 		assertTestMessageResponse(t, res)
 	}
 }
 
 type testServer struct {
-	server     *Server
-	resolverPk ed25519.PublicKey
-	udpConn    *net.UDPConn
 	tcpListen  net.Listener
+	server     *Server
+	udpConn    *net.UDPConn
+	resolverPk ed25519.PublicKey
 }
 
 func (s *testServer) TCPAddr() *net.TCPAddr {
@@ -268,6 +271,7 @@ func newTestServer(t require.TestingT, handler Handler) *testServer {
 	go func() {
 		_ = s.ServeTCP(srv.tcpListen)
 	}()
+
 	return srv
 }
 
@@ -314,5 +318,6 @@ func (h *testLargeMsgHandler) ServeDNS(rw ResponseWriter, r *dns.Msg) error {
 	}
 
 	res.Compress = true
+
 	return rw.WriteMsg(res)
 }
