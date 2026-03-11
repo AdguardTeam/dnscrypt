@@ -13,11 +13,11 @@ import (
 	"github.com/miekg/dns"
 )
 
-// default read timeout for all reads
+// defaultReadTimeout is the default read timeout for all reads.
 const defaultReadTimeout = 2 * time.Second
 
-// in case of TCP we only use defaultReadTimeout for the first read
-// then we start using defaultTCPIdleTimeout
+// defaultTCPIdleTimeout is the timeout used for TCP connections after the first
+// read.  For the first read [defaultReadTimeout] is used.
 const defaultTCPIdleTimeout = 8 * time.Second
 
 // defaultUDPSize is the default size of the UDP read buffer.  The release notes
@@ -28,67 +28,78 @@ const defaultTCPIdleTimeout = 8 * time.Second
 // See also: https://github.com/AdguardTeam/AdGuardDNS/issues/188.
 const defaultUDPSize = 1252
 
-// helper struct that is used in several SetReadDeadline calls
+// longTimeAgo is a helper variable that is used in several SetReadDeadline
+// calls.
 var longTimeAgo = time.Unix(1, 0)
 
-// ServerDNSCrypt is an interface for a DNSCrypt server
+// ServerDNSCrypt is an interface for a DNSCrypt server.
 type ServerDNSCrypt interface {
-	// ServeTCP listens to TCP connections, queries are then processed by Server.Handler.
-	// It blocks the calling goroutine and to stop it you need to close the listener
-	// or call ServerDNSCrypt.Shutdown.
+	// ServeTCP listens to TCP connections, queries are then processed by
+	// [Server.Handler].  It blocks the calling goroutine and to stop it you
+	// need to close the listener or call [ServerDNSCrypt.Shutdown].
 	ServeTCP(l net.Listener) error
 
-	// ServeUDP listens to UDP connections, queries are then processed by Server.Handler.
-	// It blocks the calling goroutine and to stop it you need to close the listener
-	// or call ServerDNSCrypt.Shutdown.
+	// ServeUDP listens to UDP connections, queries are then processed by
+	// [Server.Handler].  It blocks the calling goroutine and to stop it you
+	// need to close the listener or call [ServerDNSCrypt.Shutdown].
 	ServeUDP(l *net.UDPConn) error
 
-	// Shutdown tries to gracefully shutdown the server. It waits until all
-	// connections are processed and only after that it leaves the method.
-	// If context deadline is specified, it will exit earlier
-	// or call ServerDNSCrypt.Shutdown.
+	// Shutdown tries to gracefully shutdown the server.  It waits until all
+	// connections are processed and only after that it leaves the method.  If
+	// context deadline is specified, it will exit earlier.
 	Shutdown(ctx context.Context) error
 }
 
-// Server is a simple DNSCrypt server implementation
+// Server is the default implementation of the [ServerDNSCrypt] interface.
 type Server struct {
-	// Handler to invoke. If nil, uses DefaultHandler.
+	// Handler to invoke.  If nil, the [DefaultHandler] is used.
 	Handler Handler
 
-	// ResolverCert contains resolver certificate.
+	// ResolverCert contains resolver certificate.  It must not be nil.
 	ResolverCert *Cert
 
-	// Logger is a logger instance for Server. If not set, slog.Default() will
+	// Logger is a logger instance for Server.  If not set, slog.Default() will
 	// be used.
 	Logger *slog.Logger
 
-	tcpListeners map[net.Listener]struct{} // track active TCP listeners
-	udpListeners map[*net.UDPConn]struct{} // track active UDP listeners
-	tcpConns     map[net.Conn]struct{}     // track active connections
+	// tcpListeners tracks active TCP listeners.
+	tcpListeners map[net.Listener]struct{}
 
-	// ProviderName is a DNSCrypt provider name
+	// udpListeners tracks active UDP listeners.
+	udpListeners map[*net.UDPConn]struct{}
+
+	// tcpConns tracks active connections.
+	//
+	// TODO(f.setrakov): Consider using syncutil.Map.
+	tcpConns map[net.Conn]struct{}
+
+	// ProviderName is a DNSCrypt provider name.
 	ProviderName string
 
-	wg sync.WaitGroup // active workers (servers)
+	// wg tracks active workers (servers).
+	wg sync.WaitGroup
+
 	// UDPSize is the default buffer size to use to read incoming UDP messages.
 	// If not set it defaults to defaultUDPSize (1252 B).
 	UDPSize int
-	lock    sync.RWMutex // protects access to all the fields below
 
-	// make sure init is called only once
+	// lock protects access to all the fields below.
+	lock sync.RWMutex
+
+	// initOnce makes sure init is called only once.
 	initOnce sync.Once
 
+	// started indicates whether the server is processing queries.
 	started bool
 }
 
 // type check
-var _ ServerDNSCrypt = &Server{}
+var _ ServerDNSCrypt = (*Server)(nil)
 
-// prepareShutdown - prepares the server to shutdown:
-// unblocks reads from all connections related to this server
-// marks the server as stopped
-// if the server is not started, returns ErrServerNotStarted
-func (s *Server) prepareShutdown() error {
+// prepareShutdown prepares the server to shutdown: unblocks reads from all
+// connections related to this server, marks the server as stopped.  If the
+// server is not started, returns [ErrServerNotStarted].
+func (s *Server) prepareShutdown() (err error) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -101,18 +112,15 @@ func (s *Server) prepareShutdown() error {
 	s.started = false
 
 	// These listeners were passed to us from the outside so we cannot close
-	// them here - this is up to the calling code to do that. Instead of that,
+	// them here - this is up to the calling code to do that.  Instead of that,
 	// we call Set(Read)Deadline to unblock goroutines that are currently
-	// blocked on reading from those listeners.
-	// For tcpConns we would like to avoid closing them to be able to process
-	// queries before shutting everything down.
-
-	// Unblock reads for all active tcpConns
+	// blocked on reading from those listeners.  For tcpConns we would like to
+	// avoid closing them to be able to process queries before shutting
+	// everything down.
 	for conn := range s.tcpConns {
 		_ = conn.SetReadDeadline(longTimeAgo)
 	}
 
-	// Unblock reads for all active TCP listeners
 	for l := range s.tcpListeners {
 		switch v := l.(type) {
 		case *net.TCPListener:
@@ -120,7 +128,6 @@ func (s *Server) prepareShutdown() error {
 		}
 	}
 
-	// Unblock reads for all active UDP listeners
 	for l := range s.udpListeners {
 		_ = l.SetReadDeadline(longTimeAgo)
 	}
@@ -128,18 +135,17 @@ func (s *Server) prepareShutdown() error {
 	return nil
 }
 
-// Shutdown tries to gracefully shutdown the server. It waits until all
-// connections are processed and only after that it leaves the method.
-// If context deadline is specified, it will exit earlier.
-func (s *Server) Shutdown(ctx context.Context) error {
+// Shutdown tries to gracefully shutdown the server.  It waits until all
+// connections are processed and only after that it leaves the method.  If
+// context deadline is specified, it will exit earlier.
+func (s *Server) Shutdown(ctx context.Context) (err error) {
 	s.logger().Info("shutting down the DNSCrypt server")
 
-	err := s.prepareShutdown()
+	err = s.prepareShutdown()
 	if err != nil {
 		return err
 	}
 
-	// Using this channel to wait until all goroutines finish their work
 	closed := make(chan struct{})
 	go func() {
 		s.wg.Wait()
@@ -147,8 +153,6 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		close(closed)
 	}()
 
-	// Wait for either all goroutines finish their work
-	// Or for the context deadline
 	select {
 	case <-closed:
 		s.logger().Info("DNSCrypt server has been stopped")
@@ -160,8 +164,8 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return err
 }
 
-// init initializes (lazily) Server properties on startup
-// this method is called from Server.ServeTCP and Server.ServeUDP
+// init initializes (lazily) Server properties on startup.  This method is
+// called from [Server.ServeTCP] and [Server.ServeUDP].
 func (s *Server) init() {
 	s.tcpConns = map[net.Conn]struct{}{}
 	s.udpListeners = map[*net.UDPConn]struct{}{}
@@ -172,7 +176,7 @@ func (s *Server) init() {
 	}
 }
 
-// logger returns the logger instance of slog.Default() if it was not
+// logger returns the logger instance or slog.Default() if it was not
 // configured.
 func (s *Server) logger() (l *slog.Logger) {
 	if s.Logger == nil {
@@ -182,9 +186,9 @@ func (s *Server) logger() (l *slog.Logger) {
 	return s.Logger
 }
 
-// isStarted returns true if the server is processing queries right now
-// it means that Server.ServeTCP and/or Server.ServeUDP have been called
-func (s *Server) isStarted() bool {
+// isStarted returns true if the server is processing queries right now.  It
+// means that [Server.ServeTCP] and/or [Server.ServeUDP] have been called.
+func (s *Server) isStarted() (ok bool) {
 	s.lock.RLock()
 	started := s.started
 	s.lock.RUnlock()
@@ -192,8 +196,8 @@ func (s *Server) isStarted() bool {
 	return started
 }
 
-// serveDNS serves a DNS response
-func (s *Server) serveDNS(rw ResponseWriter, r *dns.Msg) error {
+// serveDNS serves a DNS response.  rw and r must not be nil.
+func (s *Server) serveDNS(rw ResponseWriter, r *dns.Msg) (err error) {
 	if r == nil || len(r.Question) != 1 || r.Response {
 		return ErrInvalidQuery
 	}
@@ -205,7 +209,7 @@ func (s *Server) serveDNS(rw ResponseWriter, r *dns.Msg) error {
 		handler = DefaultHandler
 	}
 
-	err := handler.ServeDNS(rw, r)
+	err = handler.ServeDNS(rw, r)
 	if err != nil {
 		s.logger().Debug("error while handling a DNS query", slogutil.KeyError, err)
 
@@ -217,8 +221,8 @@ func (s *Server) serveDNS(rw ResponseWriter, r *dns.Msg) error {
 	return nil
 }
 
-// encrypt encrypts DNSCrypt response
-func (s *Server) encrypt(m *dns.Msg, q EncryptedQuery) ([]byte, error) {
+// encrypt encrypts DNSCrypt response.  m must not be nil.
+func (s *Server) encrypt(m *dns.Msg, q EncryptedQuery) (encrypted []byte, err error) {
 	r := EncryptedResponse{
 		EsVersion: q.EsVersion,
 		Nonce:     q.Nonce,
@@ -236,47 +240,43 @@ func (s *Server) encrypt(m *dns.Msg, q EncryptedQuery) ([]byte, error) {
 	return r.Encrypt(packet, sharedKey)
 }
 
-// decrypt decrypts the incoming message and returns a DNS message to process
-func (s *Server) decrypt(b []byte) (*dns.Msg, EncryptedQuery, error) {
-	q := EncryptedQuery{
+// decrypt decrypts the incoming message and returns a DNS message to process.
+func (s *Server) decrypt(b []byte) (msg *dns.Msg, query EncryptedQuery, err error) {
+	query = EncryptedQuery{
 		EsVersion:   s.ResolverCert.EsVersion,
 		ClientMagic: s.ResolverCert.ClientMagic,
 	}
-	msg, err := q.Decrypt(b, s.ResolverCert.ResolverSk)
+	decrypted, err := query.Decrypt(b, s.ResolverCert.ResolverSk)
 	if err != nil {
-		// Failed to decrypt, dropping it
-		return nil, q, err
+		return nil, query, err
 	}
 
-	r := new(dns.Msg)
-	err = r.Unpack(msg)
+	msg = &dns.Msg{}
+	err = msg.Unpack(decrypted)
 	if err != nil {
-		// Invalid DNS message, ignore
-		return nil, q, err
+		return nil, query, err
 	}
 
-	return r, q, nil
+	return msg, query, nil
 }
 
-// handleHandshake handles a TXT request that requests certificate data
-func (s *Server) handleHandshake(b []byte, certTxt string) ([]byte, error) {
+// handleHandshake handles a TXT request that requests certificate data.
+func (s *Server) handleHandshake(b []byte, certTxt string) (res []byte, err error) {
 	m := new(dns.Msg)
-	err := m.Unpack(b)
+	err = m.Unpack(b)
 	if err != nil {
-		// Not a handshake, just ignore it
 		return nil, err
 	}
 
 	if len(m.Question) != 1 || m.Response {
-		// Invalid query
 		return nil, ErrInvalidQuery
 	}
 
 	q := m.Question[0]
 	providerName := dns.Fqdn(s.ProviderName)
-	qName := strings.ToLower(q.Name) // important, may be random case
+
+	qName := strings.ToLower(q.Name)
 	if q.Qtype != dns.TypeTXT || qName != providerName {
-		// Invalid provider name or type, doing nothing
 		return nil, ErrInvalidQuery
 	}
 
@@ -286,7 +286,7 @@ func (s *Server) handleHandshake(b []byte, certTxt string) ([]byte, error) {
 		Hdr: dns.RR_Header{
 			Name:   q.Name,
 			Rrtype: dns.TypeTXT,
-			Ttl:    60, // use 60 seconds by default, but it shouldn't matter
+			Ttl:    60,
 			Class:  dns.ClassINET,
 		},
 		Txt: []string{
@@ -295,14 +295,14 @@ func (s *Server) handleHandshake(b []byte, certTxt string) ([]byte, error) {
 	}
 	reply.Answer = append(reply.Answer, txt)
 
-	// These bits are important for the old dnscrypt-proxy versions
+	// These bits are important for the old dnscrypt-proxy versions.
 	reply.Authoritative = true
 	reply.RecursionAvailable = true
 
 	return reply.Pack()
 }
 
-// validate checks if the Server config is properly set
+// validate checks if the Server config is properly set.
 func (s *Server) validate() (err error) {
 	if s.ResolverCert == nil {
 		return errors.Annotate(ErrServerConfig, "ResolverCert is required")
@@ -319,14 +319,14 @@ func (s *Server) validate() (err error) {
 	return nil
 }
 
-// getCertTXT serializes the cert TXT record that are to be sent to the client
-func (s *Server) getCertTXT() (string, error) {
+// getCertTXT serializes the cert TXT record that are to be sent to the client.
+func (s *Server) getCertTXT() (cert string, err error) {
 	certBuf, err := s.ResolverCert.Serialize()
 	if err != nil {
 		return "", err
 	}
 
-	certTxt := packTxtString(certBuf)
+	cert = packTxtString(certBuf)
 
-	return certTxt, nil
+	return cert, nil
 }

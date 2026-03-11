@@ -200,5 +200,8 @@ run_linter "$go" tool errcheck work
 
 run_linter "$go" tool staticcheck --matrix work <<-'EOF'
 	darwin: GOOS=darwin
-	linux:  GOOS=linux
+	freebsd: GOOS=freebsd
+	linux:   GOOS=linux
+	openbsd: GOOS=openbsd
+	windows: GOOS=windows
 EOF

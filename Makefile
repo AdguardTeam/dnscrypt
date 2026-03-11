@@ -22,7 +22,7 @@ BRANCH = $${BRANCH:-$$(git rev-parse --abbrev-ref HEAD)}
 GOAMD64 = v1
 GOPROXY = https://proxy.golang.org|direct
 GOTELEMETRY = off
-GOTOOLCHAIN = go1.25.7
+GOTOOLCHAIN = go1.25.8
 RACE = 0
 REVISION = $${REVISION:-$$(git rev-parse --short HEAD)}
 VERSION = 0
@@ -76,10 +76,18 @@ go-check: go-lint go-test
 
 # A quick check to make sure that all operating systems relevant to the
 # development of the project can be typechecked and built successfully.
+#
+# NOTE: It is also important to check on both 32- and 64-bit systems.
 .PHONY: go-os-check
 go-os-check:
 	$(ENV) GOOS='darwin' "$(GO.MACRO)" vet ./...
-	$(ENV) GOOS='linux'  "$(GO.MACRO)" vet ./...
+	$(ENV) GOOS='freebsd'  "$(GO.MACRO)" vet ./...
+	$(ENV) GOOS='linux' "$(GO.MACRO)" vet ./...
+	$(ENV) GOOS='openbsd'  "$(GO.MACRO)" vet ./...
+	$(ENV) GOOS='windows' "$(GO.MACRO)" vet ./...
+
+	$(ENV) GOARCH='amd64' GOOS='linux' "$(GO.MACRO)" vet ./...
+	$(ENV) GOARCH='386'   GOOS='linux' "$(GO.MACRO)" vet ./...
 
 .PHONY: txt-lint
 txt-lint: ; $(ENV) "$(SHELL)" ./scripts/make/txt-lint.sh

@@ -8,24 +8,22 @@ import (
 	"time"
 )
 
-// Cert is a DNSCrypt server certificate
-// See ResolverConfig for more info on how to create one
+// Cert is a DNSCrypt server certificate.  See [ResolverConfig] for more info
+// on how to create one.
 type Cert struct {
-	// Serial is a 4 byte serial number in big-endian format. If more than
-	// one certificates are valid, the client must prefer the certificate
-	// with a higher serial number.
+	// Serial is a 4 byte serial number in big-endian format.  If more than
+	// one certificates are valid, the client must prefer the certificate with
+	// a higher serial number.
 	Serial uint32
 
-	// <es-version> ::= the cryptographic construction to use with this
+	// EsVersion is the cryptographic construction to use with this
 	// certificate.
-	// For X25519-XSalsa20Poly1305, <es-version> must be 0x00 0x01.
-	// For X25519-XChacha20Poly1305, <es-version> must be 0x00 0x02.
 	EsVersion CryptoConstruction
 
 	// Signature is a 64-byte signature of (<resolver-pk> <client-magic>
 	// <serial> <ts-start> <ts-end> <extensions>) using the Ed25519 algorithm
-	// and the provider secret key. Ed25519 must be used in this version of the
-	// protocol.
+	// and the provider secret key.  Ed25519 must be used in this version of
+	// the protocol.
 	Signature [ed25519.SignatureSize]byte
 
 	// ResolverPk is the resolver's short-term public key, which is 32 bytes
@@ -39,11 +37,11 @@ type Cert struct {
 	ResolverSk [keySize]byte
 
 	// ClientMagic is the first 8 bytes of a client query that is to be built
-	// using the information from this certificate. It may be a truncated
-	// public key. Two valid certificates cannot share the same <client-magic>.
+	// using the information from this certificate.  It may be a truncated
+	// public key.  Two valid certificates cannot share the same <client-magic>.
 	ClientMagic [clientMagicSize]byte
 
-	// NotAfter is the date the certificate is valid from, as a big-endian
+	// NotBefore is the date the certificate is valid from, as a big-endian
 	// 4-byte unsigned Unix timestamp.
 	NotBefore uint32
 
@@ -52,15 +50,14 @@ type Cert struct {
 	NotAfter uint32
 }
 
-// Serialize serializes the cert to bytes
+// Serialize serializes the cert to bytes.
 // <cert> ::= <cert-magic> <es-version> <protocol-minor-version> <signature>
 // <resolver-pk> <client-magic> <serial> <ts-start> <ts-end>
 // <extensions>
 // Certificates made of these information, without extensions, are 116 bytes
-// long. With the addition of the cert-magic, es-version and
+// long.  With the addition of the cert-magic, es-version and
 // protocol-minor-version, the record is 124 bytes long.
 func (c *Cert) Serialize() (serialized []byte, err error) {
-	// validate
 	if c.EsVersion == UndefinedConstruction {
 		return nil, ErrEsVersion
 	}
@@ -69,39 +66,36 @@ func (c *Cert) Serialize() (serialized []byte, err error) {
 		return nil, ErrInvalidDate
 	}
 
-	// start serializing
+	// Start serializing.
 	serialized = make([]byte, 124)
 
-	// <cert-magic>
+	// <cert-magic>.
 	copy(serialized[:4], certMagic[:])
-	// <es-version>
+	// <es-version>.
 	binary.BigEndian.PutUint16(serialized[4:6], uint16(c.EsVersion))
-	// <protocol-minor-version> - always 0x00 0x00
+	// <protocol-minor-version> is always 0x00 0x00.
 	copy(serialized[6:8], []byte{0, 0})
-	// <signature>
+	// <signature>.
 	copy(serialized[8:72], c.Signature[:ed25519.SignatureSize])
-	// signed: (<resolver-pk> <client-magic> <serial> <ts-start> <ts-end> <extensions>)
+	// signed: (<resolver-pk> <client-magic> <serial> <ts-start> <ts-end> <extensions>).
 	c.writeSigned(serialized[72:])
 
-	// done
 	return serialized, nil
 }
 
-// Deserialize deserializes certificate from a byte array
+// Deserialize deserializes certificate from a byte array.
 // <cert> ::= <cert-magic> <es-version> <protocol-minor-version> <signature>
 // <resolver-pk> <client-magic> <serial> <ts-start> <ts-end>
 // <extensions>
-func (c *Cert) Deserialize(b []byte) error {
+func (c *Cert) Deserialize(b []byte) (err error) {
 	if len(b) < 124 {
 		return ErrCertTooShort
 	}
 
-	// <cert-magic>
 	if !bytes.Equal(b[:4], certMagic[:4]) {
 		return ErrCertMagic
 	}
 
-	// <es-version>
 	switch esVersion := binary.BigEndian.Uint16(b[4:6]); esVersion {
 	case uint16(XSalsa20Poly1305):
 		c.EsVersion = XSalsa20Poly1305
@@ -111,20 +105,14 @@ func (c *Cert) Deserialize(b []byte) error {
 		return ErrEsVersion
 	}
 
-	// Ignore 6:8, <protocol-minor-version>
-	// <signature>
 	copy(c.Signature[:], b[8:72])
-	// <resolver-pk>
 	copy(c.ResolverPk[:], b[72:104])
-	// <client-magic>
 	copy(c.ClientMagic[:], b[104:112])
-	// <serial>
+
 	c.Serial = binary.BigEndian.Uint32(b[112:116])
-	// <ts-start> <ts-end>
 	c.NotBefore = binary.BigEndian.Uint32(b[116:120])
 	c.NotAfter = binary.BigEndian.Uint32(b[120:124])
 
-	// Deserialized with no issues
 	return nil
 }
 
@@ -143,7 +131,7 @@ func (c *Cert) VerifyDate() (ok bool) {
 }
 
 // VerifySignature checks if the cert is properly signed with the specified
-// signature.
+// signature.  publicKey must not be nil.
 func (c *Cert) VerifySignature(publicKey ed25519.PublicKey) (ok bool) {
 	b := make([]byte, 52)
 	c.writeSigned(b)
@@ -151,7 +139,7 @@ func (c *Cert) VerifySignature(publicKey ed25519.PublicKey) (ok bool) {
 	return ed25519.Verify(publicKey, b, c.Signature[:])
 }
 
-// Sign creates cert.Signature.
+// Sign creates cert signature.  privateKey must not be nil.
 func (c *Cert) Sign(privateKey ed25519.PrivateKey) {
 	b := make([]byte, 52)
 	c.writeSigned(b)
@@ -159,23 +147,19 @@ func (c *Cert) Sign(privateKey ed25519.PrivateKey) {
 	copy(c.Signature[:64], signature[:64])
 }
 
-// String Cert's string representation.
-func (c *Cert) String() string {
+// String returns Cert's string representation.
+func (c *Cert) String() (s string) {
 	return fmt.Sprintf("Certificate Serial=%d NotBefore=%s NotAfter=%s EsVersion=%s",
 		c.Serial, time.Unix(int64(c.NotBefore), 0).String(),
 		time.Unix(int64(c.NotAfter), 0).String(), c.EsVersion.String())
 }
 
-// writeSigned writes (<resolver-pk> <client-magic> <serial> <ts-start> <ts-end> <extensions>).
+// writeSigned writes (<resolver-pk> <client-magic> <serial> <ts-start>
+// <ts-end> <extensions>).
 func (c *Cert) writeSigned(dst []byte) {
-	// <resolver-pk>
 	copy(dst[:32], c.ResolverPk[:keySize])
-	// <client-magic>
 	copy(dst[32:40], c.ClientMagic[:clientMagicSize])
-	// <serial>
 	binary.BigEndian.PutUint32(dst[40:44], c.Serial)
-	// <ts-start>
 	binary.BigEndian.PutUint32(dst[44:48], c.NotBefore)
-	// <ts-end>
 	binary.BigEndian.PutUint32(dst[48:52], c.NotAfter)
 }

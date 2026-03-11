@@ -7,7 +7,7 @@ Here's how to create a simple DNSCrypt client:
 	stampStr := "sdns://AQMAAAAAAAAAETk0LjE0MC4xNC4xNDo1NDQzINErR_JS3PLCu_iZEIbq95zkSV2LFsigxDIuUso_OQhzIjIuZG5zY3J5cHQuZGVmYXVsdC5uczEuYWRndWFyZC5jb20"
 
 	// Initializing the DNSCrypt client
-	c := dnscrypt.Client{Net: "udp", Timeout: 10 * time.Second}
+	c := dnscrypt.Client{Net: dnscrypt.ProtoUDP, Timeout: 10 * time.Second}
 
 	// Fetching and validating the server certificate
 	resolverInfo, err := c.Dial(stampStr)

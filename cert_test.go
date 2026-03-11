@@ -13,19 +13,13 @@ import (
 
 func TestCertSerialize(t *testing.T) {
 	cert, publicKey, _ := generateValidCert(t)
-
-	// not empty anymore
 	require.False(t, bytes.Equal(cert.Signature[:], make([]byte, 64)))
-
-	// verify the signature
 	require.True(t, cert.VerifySignature(publicKey))
 
-	// serialize
 	b, err := cert.Serialize()
 	require.NoError(t, err)
 	require.Equal(t, 124, len(b))
 
-	// check that we can deserialize it
 	cert2 := Cert{}
 	err = cert2.Deserialize(b)
 	require.NoError(t, err)
@@ -39,7 +33,7 @@ func TestCertSerialize(t *testing.T) {
 }
 
 func TestCertDeserialize(t *testing.T) {
-	// dig -t txt 2.dnscrypt-cert.opendns.com. -p 443 @208.67.220.220
+	// dig -t txt 2.dnscrypt-cert.opendns.com. -p 443 @208.67.220.220.
 	certBytes, err := os.ReadFile("testdata/dnscrypt-cert.opendns.txt")
 	require.NoError(t, err)
 
@@ -55,27 +49,29 @@ func TestCertDeserialize(t *testing.T) {
 	require.Equal(t, uint32(1606347744), cert.NotAfter)
 }
 
-func generateValidCert(t *testing.T) (*Cert, ed25519.PublicKey, ed25519.PrivateKey) {
-	cert := &Cert{
+// generateValidCert is a helper that generates a valid certificate and key pair
+// using default parameters for testing purposes.
+func generateValidCert(
+	tb testing.TB,
+) (cert *Cert, publicKey ed25519.PublicKey, privateKey ed25519.PrivateKey) {
+	tb.Helper()
+
+	cert = &Cert{
 		Serial:    1,
 		NotAfter:  uint32(time.Now().Add(1 * time.Hour).Unix()),
 		NotBefore: uint32(time.Now().Add(-1 * time.Hour).Unix()),
 		EsVersion: XChacha20Poly1305,
 	}
 
-	// generate short-term resolver private key
 	resolverSk, resolverPk := generateRandomKeyPair()
 	copy(cert.ResolverPk[:], resolverPk[:])
 	copy(cert.ResolverSk[:], resolverSk[:])
 
-	// empty at first
-	require.True(t, bytes.Equal(cert.Signature[:], make([]byte, 64)))
+	require.True(tb, bytes.Equal(cert.Signature[:], make([]byte, 64)))
 
-	// generate private key
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
-	require.NoError(t, err)
+	require.NoError(tb, err)
 
-	// sign the data
 	cert.Sign(privateKey)
 
 	return cert, publicKey, privateKey

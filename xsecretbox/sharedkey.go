@@ -1,8 +1,6 @@
 package xsecretbox
 
 import (
-	"github.com/AdguardTeam/golibs/errors"
-
 	"golang.org/x/crypto/chacha20"
 	"golang.org/x/crypto/curve25519"
 )
@@ -12,9 +10,7 @@ import (
 func SharedKey(
 	secretKey [curve25519.ScalarSize]byte,
 	publicKey [curve25519.PointSize]byte,
-) ([KeySize]byte, error) {
-	var sharedKey [curve25519.PointSize]byte
-
+) (sharedKey [KeySize]byte, err error) {
 	sk, err := curve25519.X25519(secretKey[:], publicKey[:])
 	if err != nil {
 		return sharedKey, err
@@ -27,10 +23,9 @@ func SharedKey(
 	}
 
 	if c == 0 {
-		return sharedKey, errors.New("weak public key")
+		return sharedKey, errWeakPublicKey
 	}
 
-	// HChaCha20 uses only 16 bytes long nonces.
 	var nonce [16]byte
 	hRes, err := chacha20.HChaCha20(sharedKey[:], nonce[:])
 	if err != nil {

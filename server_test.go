@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AdguardTeam/golibs/testutil"
 	"github.com/ameshkov/dnsstamps"
 	"github.com/miekg/dns"
 	"github.com/stretchr/testify/require"
@@ -28,19 +29,19 @@ func TestServer_Shutdown(t *testing.T) {
 }
 
 func TestServer_UDPServeCert(t *testing.T) {
-	testServerServeCert(t, "udp")
+	testServerServeCert(t, ProtoUDP)
 }
 
 func TestServer_TCPServeCert(t *testing.T) {
-	testServerServeCert(t, "tcp")
+	testServerServeCert(t, ProtoTCP)
 }
 
 func TestServer_UDPRespondMessages(t *testing.T) {
-	testServerRespondMessages(t, "udp")
+	testServerRespondMessages(t, ProtoUDP)
 }
 
 func TestServer_TCPRespondMessages(t *testing.T) {
-	testServerRespondMessages(t, "tcp")
+	testServerRespondMessages(t, ProtoTCP)
 }
 
 func TestServer_ReadTimeout(t *testing.T) {
@@ -48,26 +49,23 @@ func TestServer_ReadTimeout(t *testing.T) {
 	t.Cleanup(func() {
 		require.NoError(t, srv.Close())
 	})
-	// Sleep for "defaultReadTimeout" before trying to shutdown the server
-	// The point is to make sure readTimeout is properly handled by
-	// the "Serve*" goroutines and they don't finish their work unexpectedly
+	// Sleep for "defaultReadTimeout" before trying to shutdown the server.  The
+	// point is to make sure readTimeout is properly handled by the "Serve*"
+	// goroutines and they don't finish their work unexpectedly.
 	time.Sleep(defaultReadTimeout)
-	testThisServerRespondMessages(t, "udp", srv)
-	testThisServerRespondMessages(t, "tcp", srv)
+	testThisServerRespondMessages(t, ProtoUDP, srv)
+	testThisServerRespondMessages(t, ProtoTCP, srv)
 }
 
 func TestServer_UDPTruncateMessage(t *testing.T) {
-	// Create a test server that returns large response which should be
-	// truncated if sent over UDP
 	srv := newTestServer(t, &testLargeMsgHandler{})
 	t.Cleanup(func() {
 		require.NoError(t, srv.Close())
 	})
 
-	// Create client and connect
 	client := &Client{
 		Timeout: 1 * time.Second,
-		Net:     "udp",
+		Proto:   ProtoUDP,
 	}
 	serverAddr := fmt.Sprintf("127.0.0.1:%d", srv.UDPAddr().Port)
 	stamp := dnsstamps.ServerStamp{
@@ -80,7 +78,6 @@ func TestServer_UDPTruncateMessage(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, ri)
 
-	// Send a test message and check that the response was truncated
 	m := createTestMessage()
 	res, err := client.Exchange(m, ri)
 	require.NoError(t, err)
@@ -91,20 +88,15 @@ func TestServer_UDPTruncateMessage(t *testing.T) {
 }
 
 func TestServer_UDPEDNS0_NoTruncate(t *testing.T) {
-	// Create a test server that returns large response which should be
-	// truncated if sent over UDP
-	// However, when EDNS0 is set with the buffer large enough, there should
-	// be no truncation
 	srv := newTestServer(t, &testLargeMsgHandler{})
 	t.Cleanup(func() {
 		require.NoError(t, srv.Close())
 	})
 
-	// Create client and connect
 	client := &Client{
 		Timeout: 1 * time.Second,
-		Net:     "udp",
-		UDPSize: 7000, // make sure the client will be able to read the response
+		Proto:   ProtoUDP,
+		UDPSize: 7000,
 	}
 	serverAddr := fmt.Sprintf("127.0.0.1:%d", srv.UDPAddr().Port)
 	stamp := dnsstamps.ServerStamp{
@@ -117,14 +109,12 @@ func TestServer_UDPEDNS0_NoTruncate(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, ri)
 
-	// Send a test message with UDP buffer size large enough
-	// and check that the response was NOT truncated
 	m := createTestMessage()
 	m.Extra = append(m.Extra, &dns.OPT{
 		Hdr: dns.RR_Header{
 			Name:   ".",
 			Rrtype: dns.TypeOPT,
-			Class:  2000, // Set large enough UDPSize here
+			Class:  2000,
 		},
 	})
 	res, err := client.Exchange(m, ri)
@@ -135,19 +125,19 @@ func TestServer_UDPEDNS0_NoTruncate(t *testing.T) {
 	require.False(t, res.Truncated)
 }
 
-func testServerServeCert(t *testing.T, network string) {
+func testServerServeCert(t *testing.T, proto Proto) {
 	srv := newTestServer(t, &testHandler{})
 	t.Cleanup(func() {
 		require.NoError(t, srv.Close())
 	})
 
 	client := &Client{
-		Net:     network,
+		Proto:   proto,
 		Timeout: 1 * time.Second,
 	}
 
 	serverAddr := fmt.Sprintf("127.0.0.1:%d", srv.UDPAddr().Port)
-	if network == "tcp" {
+	if proto == ProtoTCP {
 		serverAddr = fmt.Sprintf("127.0.0.1:%d", srv.TCPAddr().Port)
 	}
 
@@ -171,22 +161,29 @@ func testServerServeCert(t *testing.T, network string) {
 	require.True(t, bytes.Equal(srv.server.ResolverCert.ResolverPk[:], ri.ResolverCert.ResolverPk[:]))
 }
 
-func testServerRespondMessages(t *testing.T, network string) {
-	srv := newTestServer(t, &testHandler{})
-	t.Cleanup(func() {
-		require.NoError(t, srv.Close())
-	})
-	testThisServerRespondMessages(t, network, srv)
+// testServerRespondMessages is a helper that verifies that the [testServer]
+// responds to the default messages as expected.  The server will use the given
+// protocol and [testHandler].
+func testServerRespondMessages(tb testing.TB, proto Proto) {
+	tb.Helper()
+
+	srv := newTestServer(tb, &testHandler{})
+	testutil.CleanupAndRequireSuccess(tb, srv.Close)
+	testThisServerRespondMessages(tb, proto, srv)
 }
 
-func testThisServerRespondMessages(t *testing.T, network string, srv *testServer) {
+// testThisServerRespondMessages is a helper that verifies that the given server
+// responds to the default messages as expected.
+func testThisServerRespondMessages(tb testing.TB, proto Proto, srv *testServer) {
+	tb.Helper()
+
 	client := &Client{
 		Timeout: 1 * time.Second,
-		Net:     network,
+		Proto:   proto,
 	}
 
 	serverAddr := fmt.Sprintf("127.0.0.1:%d", srv.UDPAddr().Port)
-	if network == "tcp" {
+	if proto == ProtoTCP {
 		serverAddr = fmt.Sprintf("127.0.0.1:%d", srv.TCPAddr().Port)
 	}
 
@@ -197,23 +194,24 @@ func testThisServerRespondMessages(t *testing.T, network string, srv *testServer
 		Proto:         dnsstamps.StampProtoTypeDNSCrypt,
 	}
 	ri, err := client.DialStamp(stamp)
-	require.NoError(t, err)
-	require.NotNil(t, ri)
+	require.NoError(tb, err)
+	require.NotNil(tb, ri)
 
 	var conn net.Conn
-	conn, err = net.Dial(network, stamp.ServerAddrStr)
-	require.NoError(t, err)
+	conn, err = net.Dial(string(proto), stamp.ServerAddrStr)
+	require.NoError(tb, err)
 
 	for i := 0; i < 10; i++ {
 		m := createTestMessage()
 
 		var res *dns.Msg
 		res, err = client.ExchangeConn(conn, m, ri)
-		require.NoError(t, err)
-		assertTestMessageResponse(t, res)
+		require.NoError(tb, err)
+		assertTestMessageResponse(tb, res)
 	}
 }
 
+// testServer is the implementation of the [ServerDNSCrypt] interface for tests.
 type testServer struct {
 	tcpListen  net.Listener
 	server     *Server
@@ -221,26 +219,30 @@ type testServer struct {
 	resolverPk ed25519.PublicKey
 }
 
-func (s *testServer) TCPAddr() *net.TCPAddr {
+// TCPAddr implements the [ServerDNSCrypt] interface for *testServer.
+func (s *testServer) TCPAddr() (addr *net.TCPAddr) {
 	return s.tcpListen.Addr().(*net.TCPAddr)
 }
 
-func (s *testServer) UDPAddr() *net.UDPAddr {
+// UDPAddr implements the [ServerDNSCrypt] interface for *testServer.
+func (s *testServer) UDPAddr() (addr *net.UDPAddr) {
 	return s.udpConn.LocalAddr().(*net.UDPAddr)
 }
 
-func (s *testServer) Close() error {
+// Close closes server connections and runs shutdown.
+func (s *testServer) Close() (err error) {
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Second))
 	defer cancel()
 
-	err := s.server.Shutdown(ctx)
+	err = s.server.Shutdown(ctx)
 	_ = s.udpConn.Close()
 	_ = s.tcpListen.Close()
 
 	return err
 }
 
-func newTestServer(t require.TestingT, handler Handler) *testServer {
+// newTestServer returns properly initialized *testServer.
+func newTestServer(t require.TestingT, handler Handler) (server *testServer) {
 	rc, err := GenerateResolverConfig("example.org", nil)
 	require.NoError(t, err)
 	cert, err := rc.CreateCert()
@@ -260,9 +262,9 @@ func newTestServer(t require.TestingT, handler Handler) *testServer {
 		resolverPk: publicKey,
 	}
 
-	srv.tcpListen, err = net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4zero, Port: 0})
+	srv.tcpListen, err = net.ListenTCP(string(ProtoTCP), &net.TCPAddr{IP: net.IPv4zero, Port: 0})
 	require.NoError(t, err)
-	srv.udpConn, err = net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+	srv.udpConn, err = net.ListenUDP(string(ProtoUDP), &net.UDPAddr{IP: net.IPv4zero, Port: 0})
 	require.NoError(t, err)
 
 	go func() {
@@ -275,10 +277,11 @@ func newTestServer(t require.TestingT, handler Handler) *testServer {
 	return srv
 }
 
+// testHandler is the default implementation of the [Handler] for tests.
 type testHandler struct{}
 
-// ServeDNS - implements Handler interface
-func (h *testHandler) ServeDNS(rw ResponseWriter, r *dns.Msg) error {
+// ServeDNS implements the [Handler] interface for *testHandler.
+func (h *testHandler) ServeDNS(rw ResponseWriter, r *dns.Msg) (err error) {
 	res := new(dns.Msg)
 	res.SetReply(r)
 
@@ -289,19 +292,19 @@ func (h *testHandler) ServeDNS(rw ResponseWriter, r *dns.Msg) error {
 		Ttl:    300,
 		Class:  dns.ClassINET,
 	}
-	// First record is from Google DNS
+	// First record is from Google DNS.
 	answer.A = net.IPv4(8, 8, 8, 8)
 	res.Answer = append(res.Answer, answer)
 
 	return rw.WriteMsg(res)
 }
 
-// testLargeMsgHandler is a handler that returns a huge response
-// used for testing messages truncation
+// testLargeMsgHandler is the implementation of the [Handler] interface that
+// returns a huge response used for testing message truncation.
 type testLargeMsgHandler struct{}
 
-// ServeDNS - implements Handler interface
-func (h *testLargeMsgHandler) ServeDNS(rw ResponseWriter, r *dns.Msg) error {
+// ServeDNS implements the [Handler] interface for *testLargeMsgHandler.
+func (h *testLargeMsgHandler) ServeDNS(rw ResponseWriter, r *dns.Msg) (err error) {
 	res := new(dns.Msg)
 	res.SetReply(r)
 

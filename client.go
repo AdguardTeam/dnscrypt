@@ -15,39 +15,59 @@ import (
 	"github.com/miekg/dns"
 )
 
-// Client is a DNSCrypt resolver client
+// Client is a DNSCrypt resolver client.
 type Client struct {
-	// Logger is a logger instance for Client. If not set, slog.Default() will
-	// be used.
+	// Logger is a logger instance for Client.  If not set, slog.Default()
+	// will be used.
 	Logger *slog.Logger
 
-	Net     string        // protocol (can be "udp" or "tcp", by default - "udp")
-	Timeout time.Duration // read/write timeout
+	// Proto is the base network protocol.
+	Proto Proto
 
-	// UDPSize is the maximum size of a DNS response (or query) this client can
-	// send or receive. If not set, we use dns.MinMsgSize by default.
+	// Timeout is the read/write timeout.
+	Timeout time.Duration
+
+	// UDPSize is the maximum size of a DNS response (or query) this client
+	// can send or receive.  If not set, we use dns.MinMsgSize by default.
 	UDPSize int
 }
 
-// ResolverInfo contains DNSCrypt resolver information necessary for decryption/encryption
+// ResolverInfo contains DNSCrypt resolver information necessary for
+// decryption/encryption.
 type ResolverInfo struct {
-	ResolverCert    *Cert             // Certificate info (obtained with the first unencrypted DNS request)
-	ServerAddress   string            // Server IP address
-	ProviderName    string            // Provider name
-	ServerPublicKey ed25519.PublicKey // Resolver public key (this key is used to validate cert signature)
-	SharedKey       [keySize]byte     // Shared key that is to be used to encrypt/decrypt messages
-	SecretKey       [keySize]byte     // Client short-term secret key
-	PublicKey       [keySize]byte     // Client short-term public key
+	// ResolverCert contains certificate info (obtained with the first
+	// unencrypted DNS request).
+	ResolverCert *Cert
+
+	// ServerAddress is the server IP address.
+	ServerAddress string
+
+	// ProviderName is the provider name.
+	ProviderName string
+
+	// ServerPublicKey is the resolver public key (this key is used to
+	// validate cert signature).
+	ServerPublicKey ed25519.PublicKey
+
+	// SharedKey is the shared key that is to be used to encrypt/decrypt
+	// messages.
+	SharedKey [keySize]byte
+
+	// SecretKey is the client short-term secret key.
+	SecretKey [keySize]byte
+
+	// PublicKey is the client short-term public key.
+	PublicKey [keySize]byte
 }
 
-// Dial fetches and validates DNSCrypt certificate from the given server. Data
-// received during this call is then used for DNS requests
-// encryption/decryption.
-// stampStr is an sdns:// address which is parsed using go-dnsstamps package
+// Dial fetches and validates DNSCrypt certificate from the given server.
+// Data received during this call is then used for DNS requests
+// encryption/decryption.  stampStr is an sdns:// address which is parsed using
+// go-dnsstamps package.
 func (c *Client) Dial(stampStr string) (info *ResolverInfo, err error) {
 	stamp, err := dnsstamps.NewServerStampFromString(stampStr)
 	if err != nil {
-		// Invalid SDNS stamp
+		// Invalid SDNS stamp.
 		return nil, err
 	}
 
@@ -61,52 +81,53 @@ func (c *Client) Dial(stampStr string) (info *ResolverInfo, err error) {
 // DialStamp fetches and validates DNSCrypt certificate from the given server.
 // Data received during this call is then used for DNS requests
 // encryption/decryption.
-func (c *Client) DialStamp(stamp dnsstamps.ServerStamp) (resolverInfo *ResolverInfo, err error) {
-	resolverInfo = &ResolverInfo{}
+func (c *Client) DialStamp(stamp dnsstamps.ServerStamp) (info *ResolverInfo, err error) {
+	info = &ResolverInfo{}
 
-	// Generate the secret/public pair
-	resolverInfo.SecretKey, resolverInfo.PublicKey = generateRandomKeyPair()
+	// Generate the secret/public pair.
+	info.SecretKey, info.PublicKey = generateRandomKeyPair()
 
-	// Set the provider properties
-	resolverInfo.ServerPublicKey = stamp.ServerPk
-	resolverInfo.ServerAddress = stamp.ServerAddrStr
-	resolverInfo.ProviderName = stamp.ProviderName
+	// Set the provider properties.
+	info.ServerPublicKey = stamp.ServerPk
+	info.ServerAddress = stamp.ServerAddrStr
+	info.ProviderName = stamp.ProviderName
 
 	cert, err := c.fetchCert(stamp)
 	if err != nil {
 		return nil, err
 	}
 
-	resolverInfo.ResolverCert = cert
+	info.ResolverCert = cert
 
 	// Compute shared key that we'll use to encrypt/decrypt messages.
-	sharedKey, err := computeSharedKey(cert.EsVersion, &resolverInfo.SecretKey, &cert.ResolverPk)
+	sharedKey, err := computeSharedKey(cert.EsVersion, &info.SecretKey, &cert.ResolverPk)
 	if err != nil {
 		return nil, err
 	}
 
-	resolverInfo.SharedKey = sharedKey
+	info.SharedKey = sharedKey
 
-	return resolverInfo, nil
+	return info, nil
 }
 
 // Exchange performs a synchronous DNS query to the specified DNSCrypt server
-// and returns a DNS response.  This method creates a new network connection for
-// every call so avoid using it for TCP.  DNSCrypt cert needs to be fetched and
-// validated prior to this call using the c.DialStamp method.
-func (c *Client) Exchange(m *dns.Msg, resolverInfo *ResolverInfo) (resp *dns.Msg, err error) {
-	network := "udp"
-	if c.Net == "tcp" {
-		network = "tcp"
+// and returns a DNS response.  This method creates a new network connection
+// for every call so avoid using it for TCP.  DNSCrypt cert needs to be
+// fetched and validated prior to this call using the [Client.DialStamp] method.
+// m and info must not be nil.
+func (c *Client) Exchange(m *dns.Msg, info *ResolverInfo) (resp *dns.Msg, err error) {
+	proto := ProtoUDP
+	if c.Proto == ProtoTCP {
+		proto = ProtoTCP
 	}
 
-	conn, err := net.Dial(network, resolverInfo.ServerAddress)
+	conn, err := net.Dial(string(proto), info.ServerAddress)
 	if err != nil {
 		return nil, fmt.Errorf("dialing: %w", err)
 	}
 	defer func() { err = errors.WithDeferred(err, conn.Close()) }()
 
-	resp, err = c.ExchangeConn(conn, m, resolverInfo)
+	resp, err = c.ExchangeConn(conn, m, info)
 	if err != nil {
 		return nil, fmt.Errorf("exchanging: %w", err)
 	}
@@ -116,13 +137,14 @@ func (c *Client) Exchange(m *dns.Msg, resolverInfo *ResolverInfo) (resp *dns.Msg
 
 // ExchangeConn performs a synchronous DNS query to the specified DNSCrypt
 // server and returns a DNS response.  DNSCrypt server information needs to be
-// fetched and validated prior to this call using the c.DialStamp method.
+// fetched and validated prior to this call using the [Client.DialStamp] method.
+// conn, m, and info must not be nil.
 func (c *Client) ExchangeConn(
 	conn net.Conn,
 	m *dns.Msg,
-	resolverInfo *ResolverInfo,
+	info *ResolverInfo,
 ) (resp *dns.Msg, err error) {
-	query, err := c.encrypt(m, resolverInfo)
+	query, err := c.encrypt(m, info)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +159,7 @@ func (c *Client) ExchangeConn(
 		return nil, err
 	}
 
-	resp, err = c.decrypt(b, resolverInfo)
+	resp, err = c.decrypt(b, info)
 	if err != nil {
 		return nil, err
 	}
@@ -145,8 +167,8 @@ func (c *Client) ExchangeConn(
 	return resp, nil
 }
 
-// writeQuery writes query to the network connection depending on the protocol
-// we may write a 2-byte prefix or not.
+// writeQuery writes query to the network connection.  Depending on the
+// protocol we may write a 2-byte prefix or not.  conn must not be nil.
 func (c *Client) writeQuery(conn net.Conn, query []byte) (err error) {
 	if c.Timeout > 0 {
 		_ = conn.SetWriteDeadline(time.Now().Add(c.Timeout))
@@ -171,12 +193,12 @@ func (c *Client) readResponse(conn net.Conn) (resp []byte, err error) {
 		_ = conn.SetReadDeadline(time.Now().Add(c.Timeout))
 	}
 
-	proto := "udp"
+	proto := ProtoUDP
 	if _, ok := conn.(*net.TCPConn); ok {
-		proto = "tcp"
+		proto = ProtoTCP
 	}
 
-	if proto == "udp" {
+	if proto == ProtoUDP {
 		bufSize := c.UDPSize
 		if bufSize == 0 {
 			bufSize = dns.MinMsgSize
@@ -197,19 +219,20 @@ func (c *Client) readResponse(conn net.Conn) (resp []byte, err error) {
 	return readPrefixed(conn)
 }
 
-// encrypt encrypts a DNS message using shared key from the resolver info.
-func (c *Client) encrypt(m *dns.Msg, resolverInfo *ResolverInfo) (msg []byte, err error) {
+// encrypt encrypts a DNS message using shared key from the resolver info.  m
+// and info must not be nil.
+func (c *Client) encrypt(m *dns.Msg, info *ResolverInfo) (msg []byte, err error) {
 	q := EncryptedQuery{
-		EsVersion:   resolverInfo.ResolverCert.EsVersion,
-		ClientMagic: resolverInfo.ResolverCert.ClientMagic,
-		ClientPk:    resolverInfo.PublicKey,
+		EsVersion:   info.ResolverCert.EsVersion,
+		ClientMagic: info.ResolverCert.ClientMagic,
+		ClientPk:    info.PublicKey,
 	}
 	query, err := m.Pack()
 	if err != nil {
 		return nil, err
 	}
 
-	msg, err = q.Encrypt(query, resolverInfo.SharedKey)
+	msg, err = q.Encrypt(query, info.SharedKey)
 	if len(msg) > c.maxQuerySize() {
 		return nil, ErrQueryTooLarge
 	}
@@ -217,24 +240,25 @@ func (c *Client) encrypt(m *dns.Msg, resolverInfo *ResolverInfo) (msg []byte, er
 	return msg, err
 }
 
-// decrypts decrypts a DNS message using a shared key from the resolver info.
-func (c *Client) decrypt(b []byte, resolverInfo *ResolverInfo) (res *dns.Msg, err error) {
+// decrypt decrypts a DNS message using a shared key from the resolver info.
+// info must not be nil.
+func (c *Client) decrypt(b []byte, info *ResolverInfo) (msg *dns.Msg, err error) {
 	dr := EncryptedResponse{
-		EsVersion: resolverInfo.ResolverCert.EsVersion,
+		EsVersion: info.ResolverCert.EsVersion,
 	}
 
-	msg, err := dr.Decrypt(b, resolverInfo.SharedKey)
+	response, err := dr.Decrypt(b, info.SharedKey)
 	if err != nil {
 		return nil, err
 	}
 
-	res = new(dns.Msg)
-	err = res.Unpack(msg)
+	msg = new(dns.Msg)
+	err = msg.Unpack(response)
 	if err != nil {
 		return nil, err
 	}
 
-	return res, nil
+	return msg, nil
 }
 
 // fetchCert loads DNSCrypt cert from the specified server.
@@ -248,7 +272,7 @@ func (c *Client) fetchCert(stamp dnsstamps.ServerStamp) (cert *Cert, err error) 
 	query.SetQuestion(providerName, dns.TypeTXT)
 	// use 1252 as a UDPSize for this client to make sure the buffer is not too
 	// small.
-	client := dns.Client{Net: c.Net, UDPSize: uint16(1252), Timeout: c.Timeout}
+	client := dns.Client{Net: string(c.Proto), UDPSize: uint16(1252), Timeout: c.Timeout}
 	r, _, err := client.Exchange(query, stamp.ServerAddrStr)
 	if err != nil {
 		return nil, err
@@ -272,7 +296,6 @@ func (c *Client) fetchCert(stamp dnsstamps.ServerStamp) (cert *Cert, err error) 
 
 			continue
 		} else if cert == nil {
-			// The certificate has been skipped due to Serial or EsVersion.
 			continue
 		}
 
@@ -289,8 +312,8 @@ func (c *Client) fetchCert(stamp dnsstamps.ServerStamp) (cert *Cert, err error) 
 	return nil, err
 }
 
-// parseCert parses a certificate from its string form and returns it if it has
-// priority over currentCert.
+// parseCert parses a certificate from its string form and returns it if it
+// has priority over currentCert.  currentCert must not be nil.
 func (c *Client) parseCert(
 	stamp dnsstamps.ServerStamp,
 	currentCert *Cert,
@@ -360,8 +383,9 @@ func (c *Client) parseCert(
 	return cert, nil
 }
 
-func (c *Client) maxQuerySize() int {
-	if c.Net == "tcp" {
+// maxQuerySize returns the maximum query size for the client.
+func (c *Client) maxQuerySize() (size int) {
+	if c.Proto == ProtoTCP {
 		return dns.MaxMsgSize
 	}
 
@@ -372,6 +396,8 @@ func (c *Client) maxQuerySize() int {
 	return dns.MinMsgSize
 }
 
+// logger returns the logger instance or slog.Default() if it was not
+// configured.
 func (c *Client) logger() (l *slog.Logger) {
 	if c.Logger == nil {
 		return slog.Default()

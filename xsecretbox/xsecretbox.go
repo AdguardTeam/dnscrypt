@@ -1,28 +1,31 @@
+// Package xsecretbox implements encryption/decryption of a message using
+// specified keys.
 package xsecretbox
 
 import (
 	"crypto/subtle"
 
-	"github.com/AdguardTeam/golibs/errors"
 	"golang.org/x/crypto/chacha20"
 	"golang.org/x/crypto/poly1305"
 )
 
 const (
-	// KeySize is what the name suggests.
+	// KeySize is the size of the encryption key in bytes.
 	KeySize = chacha20.KeySize
 
-	// NonceSize is what the name suggests.
+	// NonceSize is the size of the nonce in bytes.
 	NonceSize = chacha20.NonceSizeX
 
-	// TagSize is what the name suggests.
+	// TagSize is the size of the authentication tag in bytes.
 	TagSize = poly1305.TagSize
 
-	// BlockSize is what the name suggests.
+	// BlockSize is the size of the cipher block in bytes.
 	BlockSize = 64
 )
 
-// Seal does what the name suggests.
+// Seal encrypts and authenticates message using XChaCha20-Poly1305 and appends
+// the result to out.  nonce must be [NonceSize] long.  key must be [KeySize]
+// long.
 func Seal(out, nonce, message, key []byte) (res []byte) {
 	if len(nonce) != NonceSize {
 		panic("unsupported nonce size")
@@ -70,7 +73,9 @@ func Seal(out, nonce, message, key []byte) (res []byte) {
 	return res
 }
 
-// Open does what the name suggests.
+// Open decrypts and authenticates the box using the XChaCha20-Poly1305
+// algorithm, appending the result to the out parameter.  nonce must be
+// [NonceSize] elements long.  key must be [KeySize] elements long.
 func Open(out, nonce, box, key []byte) (res []byte, err error) {
 	if len(nonce) != NonceSize {
 		panic("unsupported nonce size")
@@ -81,7 +86,7 @@ func Open(out, nonce, box, key []byte) (res []byte, err error) {
 	}
 
 	if len(box) < TagSize {
-		return nil, errors.New("ciphertext is too short")
+		return nil, errCipherTextTooShort
 	}
 
 	var firstBlock [BlockSize]byte
@@ -101,7 +106,7 @@ func Open(out, nonce, box, key []byte) (res []byte, err error) {
 	hash.Sum(tag[:0])
 
 	if subtle.ConstantTimeCompare(tag[:], box[:TagSize]) != 1 {
-		return nil, errors.New("ciphertext authentication failed")
+		return nil, errCipherTextAuthenticationFail
 	}
 
 	res, out = sliceForAppend(out, len(ciphertext))
@@ -124,6 +129,8 @@ func Open(out, nonce, box, key []byte) (res []byte, err error) {
 	return res, nil
 }
 
+// sliceForAppend extends the input slice by n bytes and returns the extended
+// slice and a tail slice that points to the appended region.
 func sliceForAppend(in []byte, n int) (head, tail []byte) {
 	if total := len(in) + n; cap(in) >= total {
 		head = in[:total]

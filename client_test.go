@@ -12,7 +12,6 @@ import (
 )
 
 func TestParseStamp(t *testing.T) {
-	// Google DoH
 	stampStr := "sdns://AgUAAAAAAAAAAAAOZG5zLmdvb2dsZS5jb20NL2V4cGVyaW1lbnRhbA"
 	stamp, err := dnsstamps.NewServerStampFromString(stampStr)
 
@@ -25,7 +24,6 @@ func TestParseStamp(t *testing.T) {
 	require.Equal(t, "dns.google.com", stamp.ProviderName)
 	require.Equal(t, "/experimental", stamp.Path)
 
-	// AdGuard DNSCrypt
 	stampStr = "sdns://AQMAAAAAAAAAETk0LjE0MC4xNC4xNDo1NDQzINErR_JS3PLCu_iZEIbq95zkSV2LFsigxDIuUso_OQhzIjIuZG5zY3J5cHQuZGVmYXVsdC5uczEuYWRndWFyZC5jb20"
 	stamp, err = dnsstamps.NewServerStampFromString(stampStr)
 
@@ -48,7 +46,7 @@ func TestInvalidStamp(t *testing.T) {
 }
 
 func TestTimeoutOnDialError(t *testing.T) {
-	// AdGuard DNS pointing to a wrong IP
+	// AdGuard DNS pointing to a wrong IP.
 	stampStr := "sdns://AQIAAAAAAAAADDguOC44Ljg6NTQ0MyDRK0fyUtzywrv4mRCG6vec5EldixbIoMQyLlLKPzkIcyIyLmRuc2NyeXB0LmRlZmF1bHQubnMxLmFkZ3VhcmQuY29t"
 	client := Client{Timeout: 300 * time.Millisecond}
 
@@ -58,21 +56,18 @@ func TestTimeoutOnDialError(t *testing.T) {
 }
 
 func TestTimeoutOnDialExchange(t *testing.T) {
-	// AdGuard DNS
+	// AdGuard DNS.
 	stampStr := "sdns://AQMAAAAAAAAAETk0LjE0MC4xNC4xNDo1NDQzINErR_JS3PLCu_iZEIbq95zkSV2LFsigxDIuUso_OQhzIjIuZG5zY3J5cHQuZGVmYXVsdC5uczEuYWRndWFyZC5jb20"
 	client := Client{Timeout: 300 * time.Millisecond}
 
 	serverInfo, err := client.Dial(stampStr)
 	require.NoError(t, err)
 
-	// Point it to an IP where there's no DNSCrypt server
 	serverInfo.ServerAddress = "8.8.8.8:5443"
 	req := createTestMessage()
 
-	// Do exchange
 	_, err = client.Exchange(req, serverInfo)
 
-	// Check error
 	require.NotNil(t, err)
 	require.ErrorIs(t, err, os.ErrDeadlineExceeded)
 }
@@ -81,32 +76,25 @@ func TestFetchCertPublicResolvers(t *testing.T) {
 	testCases := []struct {
 		name     string
 		stampStr string
-	}{
-		{
-			name:     "AdGuard DNS",
-			stampStr: "sdns://AQMAAAAAAAAAETk0LjE0MC4xNC4xNDo1NDQzINErR_JS3PLCu_iZEIbq95zkSV2LFsigxDIuUso_OQhzIjIuZG5zY3J5cHQuZGVmYXVsdC5uczEuYWRndWFyZC5jb20",
-		},
-		{
-			name:     "AdGuard DNS Family",
-			stampStr: "sdns://AQMAAAAAAAAAETk0LjE0MC4xNC4xNTo1NDQzILgxXdexS27jIKRw3C7Wsao5jMnlhvhdRUXWuMm1AFq6ITIuZG5zY3J5cHQuZmFtaWx5Lm5zMS5hZGd1YXJkLmNvbQ",
-		},
-		{
-			name:     "AdGuard DNS Unfiltered",
-			stampStr: "sdns://AQMAAAAAAAAAETk0LjE0MC4xNC4xNTo1NDQzILgxXdexS27jIKRw3C7Wsao5jMnlhvhdRUXWuMm1AFq6ITIuZG5zY3J5cHQuZmFtaWx5Lm5zMS5hZGd1YXJkLmNvbQ",
-		},
-		{
-			name:     "Cisco OpenDNS",
-			stampStr: "sdns://AQAAAAAAAAAADjIwOC42Ny4yMjAuMjIwILc1EUAgbyJdPivYItf9aR6hwzzI1maNDL4Ev6vKQ_t5GzIuZG5zY3J5cHQtY2VydC5vcGVuZG5zLmNvbQ",
-		},
-		{
-			name:     "Cisco OpenDNS Family Shield",
-			stampStr: "sdns://AQAAAAAAAAAADjIwOC42Ny4yMjAuMTIzILc1EUAgbyJdPivYItf9aR6hwzzI1maNDL4Ev6vKQ_t5GzIuZG5zY3J5cHQtY2VydC5vcGVuZG5zLmNvbQ",
-		},
-		{
-			name:     "Quad9",
-			stampStr: "sdns://AQYAAAAAAAAAEzE0OS4xMTIuMTEyLjEwOjg0NDMgZ8hHuMh1jNEgJFVDvnVnRt803x2EwAuMRwNo34Idhj4ZMi5kbnNjcnlwdC1jZXJ0LnF1YWQ5Lm5ldA",
-		},
-	}
+	}{{
+		name:     "AdGuard DNS",
+		stampStr: "sdns://AQMAAAAAAAAAETk0LjE0MC4xNC4xNDo1NDQzINErR_JS3PLCu_iZEIbq95zkSV2LFsigxDIuUso_OQhzIjIuZG5zY3J5cHQuZGVmYXVsdC5uczEuYWRndWFyZC5jb20",
+	}, {
+		name:     "AdGuard DNS Family",
+		stampStr: "sdns://AQMAAAAAAAAAETk0LjE0MC4xNC4xNTo1NDQzILgxXdexS27jIKRw3C7Wsao5jMnlhvhdRUXWuMm1AFq6ITIuZG5zY3J5cHQuZmFtaWx5Lm5zMS5hZGd1YXJkLmNvbQ",
+	}, {
+		name:     "AdGuard DNS Unfiltered",
+		stampStr: "sdns://AQMAAAAAAAAAETk0LjE0MC4xNC4xNTo1NDQzILgxXdexS27jIKRw3C7Wsao5jMnlhvhdRUXWuMm1AFq6ITIuZG5zY3J5cHQuZmFtaWx5Lm5zMS5hZGd1YXJkLmNvbQ",
+	}, {
+		name:     "Cisco OpenDNS",
+		stampStr: "sdns://AQAAAAAAAAAADjIwOC42Ny4yMjAuMjIwILc1EUAgbyJdPivYItf9aR6hwzzI1maNDL4Ev6vKQ_t5GzIuZG5zY3J5cHQtY2VydC5vcGVuZG5zLmNvbQ",
+	}, {
+		name:     "Cisco OpenDNS Family Shield",
+		stampStr: "sdns://AQAAAAAAAAAADjIwOC42Ny4yMjAuMTIzILc1EUAgbyJdPivYItf9aR6hwzzI1maNDL4Ev6vKQ_t5GzIuZG5zY3J5cHQtY2VydC5vcGVuZG5zLmNvbQ",
+	}, {
+		name:     "Quad9",
+		stampStr: "sdns://AQYAAAAAAAAAEzE0OS4xMTIuMTEyLjEwOjg0NDMgZ8hHuMh1jNEgJFVDvnVnRt803x2EwAuMRwNo34Idhj4ZMi5kbnNjcnlwdC1jZXJ0LnF1YWQ5Lm5ldA",
+	}}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -114,7 +102,7 @@ func TestFetchCertPublicResolvers(t *testing.T) {
 			require.NoError(t, err)
 
 			c := &Client{
-				Net:     "udp",
+				Proto:   ProtoUDP,
 				Timeout: time.Second * 5,
 			}
 			resolverInfo, err := c.DialStamp(stamp)
@@ -127,60 +115,65 @@ func TestFetchCertPublicResolvers(t *testing.T) {
 }
 
 func TestExchangePublicResolvers(t *testing.T) {
-	stamps := []struct {
+	testCases := []struct {
+		name     string
 		stampStr string
-	}{
-		{
-			// AdGuard DNS
-			stampStr: "sdns://AQMAAAAAAAAAETk0LjE0MC4xNC4xNDo1NDQzINErR_JS3PLCu_iZEIbq95zkSV2LFsigxDIuUso_OQhzIjIuZG5zY3J5cHQuZGVmYXVsdC5uczEuYWRndWFyZC5jb20",
-		},
-		{
-			// AdGuard DNS Family
-			stampStr: "sdns://AQMAAAAAAAAAETk0LjE0MC4xNC4xNTo1NDQzILgxXdexS27jIKRw3C7Wsao5jMnlhvhdRUXWuMm1AFq6ITIuZG5zY3J5cHQuZmFtaWx5Lm5zMS5hZGd1YXJkLmNvbQ",
-		},
-		{
-			// AdGuard DNS Unfiltered
-			stampStr: "sdns://AQMAAAAAAAAAEjk0LjE0MC4xNC4xNDA6NTQ0MyC16ETWuDo-PhJo62gfvqcN48X6aNvWiBQdvy7AZrLa-iUyLmRuc2NyeXB0LnVuZmlsdGVyZWQubnMxLmFkZ3VhcmQuY29t",
-		},
-	}
+	}{{
+		name:     "adguard_dns",
+		stampStr: "sdns://AQMAAAAAAAAAETk0LjE0MC4xNC4xNDo1NDQzINErR_JS3PLCu_iZEIbq95zkSV2LFsigxDIuUso_OQhzIjIuZG5zY3J5cHQuZGVmYXVsdC5uczEuYWRndWFyZC5jb20",
+	}, {
+		name:     "adguard_dns_family",
+		stampStr: "sdns://AQMAAAAAAAAAETk0LjE0MC4xNC4xNTo1NDQzILgxXdexS27jIKRw3C7Wsao5jMnlhvhdRUXWuMm1AFq6ITIuZG5zY3J5cHQuZmFtaWx5Lm5zMS5hZGd1YXJkLmNvbQ",
+	}, {
+		name:     "adguard_dns_unfiltered",
+		stampStr: "sdns://AQMAAAAAAAAAEjk0LjE0MC4xNC4xNDA6NTQ0MyC16ETWuDo-PhJo62gfvqcN48X6aNvWiBQdvy7AZrLa-iUyLmRuc2NyeXB0LnVuZmlsdGVyZWQubnMxLmFkZ3VhcmQuY29t",
+	}}
 
-	for _, test := range stamps {
-		stamp, err := dnsstamps.NewServerStampFromString(test.stampStr)
-		require.NoError(t, err)
-
-		t.Run(stamp.ProviderName, func(t *testing.T) {
-			checkDNSCryptServer(t, test.stampStr, "udp")
-			checkDNSCryptServer(t, test.stampStr, "tcp")
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			checkDNSCryptServer(t, tc.stampStr, ProtoUDP)
+			checkDNSCryptServer(t, tc.stampStr, ProtoTCP)
 		})
 	}
 }
 
-func checkDNSCryptServer(t *testing.T, stampStr, network string) {
-	client := Client{Net: network, Timeout: 10 * time.Second}
+// chechDNSCryptServer is a helper that sends a test DNS request to the given
+// server using the given protocol and verifies the result.
+func checkDNSCryptServer(tb testing.TB, stampStr string, proto Proto) {
+	tb.Helper()
+
+	client := Client{Proto: proto, Timeout: 10 * time.Second}
 	resolverInfo, err := client.Dial(stampStr)
-	require.NoError(t, err)
+	require.NoError(tb, err)
 
 	req := createTestMessage()
 
 	reply, err := client.Exchange(req, resolverInfo)
-	require.NoError(t, err)
-	assertTestMessageResponse(t, reply)
+	require.NoError(tb, err)
+	assertTestMessageResponse(tb, reply)
 }
 
-func createTestMessage() *dns.Msg {
+// createTestMessage is a helper that returns DNS message with default
+// parameters.
+func createTestMessage() (msg *dns.Msg) {
 	req := dns.Msg{}
 	req.Id = dns.Id()
 	req.RecursionDesired = true
 	req.Question = []dns.Question{
 		{Name: "google-public-dns-a.google.com.", Qtype: dns.TypeA, Qclass: dns.ClassINET},
 	}
+
 	return &req
 }
 
-func assertTestMessageResponse(t require.TestingT, reply *dns.Msg) {
-	require.NotNil(t, reply)
-	require.Equal(t, 1, len(reply.Answer))
+// assertTestMessageResponse verifies that the reply matches the default
+// expectations.
+func assertTestMessageResponse(tb testing.TB, reply *dns.Msg) {
+	tb.Helper()
+
+	require.NotNil(tb, reply)
+	require.Equal(tb, 1, len(reply.Answer))
 	a, ok := reply.Answer[0].(*dns.A)
-	require.True(t, ok)
-	require.Equal(t, net.IPv4(8, 8, 8, 8).To4(), a.A.To4())
+	require.True(tb, ok)
+	require.Equal(tb, net.IPv4(8, 8, 8, 8).To4(), a.A.To4())
 }

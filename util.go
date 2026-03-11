@@ -11,40 +11,40 @@ import (
 	"golang.org/x/crypto/nacl/box"
 )
 
-// Prior to encryption, queries are padded using the ISO/IEC 7816-4
-// format. The padding starts with a byte valued 0x80 followed by a
-// variable number of NUL bytes.
+// Prior to encryption, queries are padded using the ISO/IEC 7816-4 format.  The
+// padding starts with a byte valued 0x80 followed by a variable number of NUL
+// bytes.
 //
-// ## Padding for client queries over UDP
+// # Padding for client queries over UDP
 //
-// <client-query> <client-query-pad> must be at least <min-query-len>
-// bytes. If the length of the client query is less than <min-query-len>,
-// the padding length must be adjusted in order to satisfy this
-// requirement.
+// <client-query> <client-query-pad> must be at least <min-query-len> bytes.  If
+// the length of the client query is less than <min-query-len>, the padding
+// length must be adjusted in order to satisfy this requirement.
 //
-// <min-query-len> is a variable length, initially set to 256 bytes, and
-// must be a multiple of 64 bytes.
+// <min-query-len> is a variable length, initially set to 256 bytes, and must be
+// a multiple of 64 bytes.
 //
-// ## Padding for client queries over TCP
+// # Padding for client queries over TCP
 //
-// The length of <client-query-pad> is randomly chosen between 1 and 256
-// bytes (including the leading 0x80), but the total length of <client-query>
+// The length of <client-query-pad> is randomly chosen between 1 and 256 bytes
+// (including the leading 0x80), but the total length of <client-query>
 // <client-query-pad> must be a multiple of 64 bytes.
 //
 // For example, an originally unpadded 56-bytes DNS query can be padded as:
-//
-// <56-bytes-query> 0x80 0x00 0x00 0x00 0x00 0x00 0x00 0x00
-// or
-// <56-bytes-query> 0x80 (0x00 * 71)
-// or
-// <56-bytes-query> 0x80 (0x00 * 135)
-// or
-// <56-bytes-query> 0x80 (0x00 * 199)
-func pad(packet []byte) []byte {
-	// get closest divisible by 64 to <packet-len> + 1 byte for 0x80
+//	<56-bytes-query> 0x80 0x00 0x00 0x00 0x00 0x00 0x00 0x00
+//	or
+//	<56-bytes-query> 0x80 (0x00 * 71)
+//	or
+//	<56-bytes-query> 0x80 (0x00 * 135)
+//	or
+//	<56-bytes-query> 0x80 (0x00 * 199)
+
+// pad performs packet padding.
+func pad(packet []byte) (padded []byte) {
+	// get closest divisible by 64 to <packet-len> + 1 byte for 0x80.
 	minQuestionSize := len(packet) + 1 + (64 - (len(packet)+1)%64)
 
-	// padded size can't be less than minUDPQuestionSize
+	// padded size can't be less than minUDPQuestionSize.
 	if minUDPQuestionSize > minQuestionSize {
 		minQuestionSize = minUDPQuestionSize
 	}
@@ -57,12 +57,13 @@ func pad(packet []byte) []byte {
 	return packet
 }
 
-// unpad - removes padding bytes
-func unpad(packet []byte) ([]byte, error) {
+// unpad removes padding bytes from packet.
+func unpad(packet []byte) (unpadded []byte, err error) {
 	for i := len(packet); ; {
 		if i == 0 {
 			return nil, ErrInvalidPadding
 		}
+
 		i--
 		if packet[i] == 0x80 {
 			if i < minDNSPacketSize {
@@ -76,17 +77,23 @@ func unpad(packet []byte) ([]byte, error) {
 	}
 }
 
-// computeSharedKey - computes a shared key
-func computeSharedKey(cryptoConstruction CryptoConstruction, secretKey, publicKey *[keySize]byte) ([keySize]byte, error) {
-	if cryptoConstruction == XChacha20Poly1305 {
-		sharedKey, err := xsecretbox.SharedKey(*secretKey, *publicKey)
+// computeSharedKey computes a shared key.  secretKey and publicKey must not
+// be nil.
+func computeSharedKey(
+	cryptoConstruction CryptoConstruction,
+	secretKey *[keySize]byte,
+	publicKey *[keySize]byte,
+) (sharedKey [keySize]byte, err error) {
+	switch cryptoConstruction {
+	case XChacha20Poly1305:
+		sharedKey, err = xsecretbox.SharedKey(*secretKey, *publicKey)
 		if err != nil {
 			return sharedKey, err
 		}
 
 		return sharedKey, nil
-	} else if cryptoConstruction == XSalsa20Poly1305 {
-		sharedKey := [sharedKeySize]byte{}
+	case XSalsa20Poly1305:
+		sharedKey = [sharedKeySize]byte{}
 		box.Precompute(&sharedKey, publicKey, secretKey)
 
 		return sharedKey, nil
@@ -95,18 +102,27 @@ func computeSharedKey(cryptoConstruction CryptoConstruction, secretKey, publicKe
 	return [keySize]byte{}, ErrEsVersion
 }
 
-func isDigit(b byte) bool { return b >= '0' && b <= '9' }
+// isDigit returns true if the given byte is a digit.
+func isDigit(b byte) (ok bool) {
+	return b >= '0' && b <= '9'
+}
 
-func dddToByte(s []byte) byte {
+// dddToByte converts a slice of three ASCII digits into a byte value.
+func dddToByte(s []byte) (res byte) {
 	return (s[0]-'0')*100 + (s[1]-'0')*10 + (s[2] - '0')
 }
 
 const (
+	// escapedByteSmall contains escaped representations of bytes from 0x00
+	// to 0x1F.
 	escapedByteSmall = "" +
 		`\000\001\002\003\004\005\006\007\008\009` +
 		`\010\011\012\013\014\015\016\017\018\019` +
 		`\020\021\022\023\024\025\026\027\028\029` +
 		`\030\031`
+
+	// escapedByteLarge contains escaped representations of bytes from 0x7F
+	// to 0xFF.
 	escapedByteLarge = `\127\128\129` +
 		`\130\131\132\133\134\135\136\137\138\139` +
 		`\140\141\142\143\144\145\146\147\148\149` +
@@ -123,9 +139,9 @@ const (
 		`\250\251\252\253\254\255`
 )
 
-// escapeByte returns the \DDD escaping of b which must
-// satisfy b < ' ' || b > '~'.
-func escapeByte(b byte) string {
+// escapeByte returns the \DDD escaping of b which must satisfy
+// b < ' ' || b > '~'.
+func escapeByte(b byte) (escaped string) {
 	if b < ' ' {
 		return escapedByteSmall[b*4 : b*4+4]
 	}
@@ -136,7 +152,9 @@ func escapeByte(b byte) string {
 	return escapedByteLarge[int(b)*4 : int(b)*4+4]
 }
 
-func packTxtString(buf []byte) string {
+// packTxtString packs a TXT string by escaping special characters.  buf must
+// not be nil.
+func packTxtString(buf []byte) (packed string) {
 	var out strings.Builder
 	out.Grow(3 + len(buf))
 	for i := 0; i < len(buf); i++ {
@@ -155,9 +173,10 @@ func packTxtString(buf []byte) string {
 	return out.String()
 }
 
-func unpackTxtString(s string) []byte {
+// unpackTxtString unpacks a TXT string by unescaping special characters.
+func unpackTxtString(s string) (msg []byte) {
 	bs := make([]byte, len(s))
-	msg := make([]byte, 0)
+	msg = make([]byte, 0)
 	copy(bs, s)
 	for i := 0; i < len(bs); i++ {
 		if bs[i] == '\\' {
@@ -182,37 +201,39 @@ func unpackTxtString(s string) []byte {
 			msg = append(msg, bs[i])
 		}
 	}
+
 	return msg
 }
 
-// normalize truncates the DNS response if needed depending on the protocol
-func normalize(proto string, req, res *dns.Msg) {
+// normalize truncates the DNS response if needed depending on the protocol.
+// req and res must not be nil.
+func normalize(proto Proto, req, res *dns.Msg) {
 	size := dnsSize(proto, req)
-	// DNSCrypt encryption adds a header to each message, we should
-	// consider this when truncating a message.
-	// 64 should cover all cases
+	// DNSCrypt encryption adds a header to each message, we should consider
+	// this when truncating a message.  64 should cover all cases.
 	size = size - 64
 
 	// Truncate response message
 	res.Truncate(size)
 
 	// In case of UDP it is safer to simply remove all response records
-	// dns.Msg.Truncate method will not consider that we need a response
-	// shorter than dns.MinMsgSize
-	if res.Truncated && proto == "udp" {
+	// [dns.Msg.Truncate] method will not consider that we need a response
+	// shorter than [dns.MinMsgSize].
+	if res.Truncated && proto == ProtoUDP {
 		res.Answer = nil
 	}
 }
 
-// dnsSize returns if buffer size *advertised* in the requests OPT record.
-// Or when the request was over TCP, we return the maximum allowed size of 64K.
-func dnsSize(proto string, r *dns.Msg) int {
+// dnsSize returns buffer size advertised in the requests OPT record.  When the
+// request was over TCP, it returns the maximum allowed size of 64K.  r must not
+// be nil.
+func dnsSize(proto Proto, r *dns.Msg) (res int) {
 	size := uint16(0)
 	if o := r.IsEdns0(); o != nil {
 		size = o.UDPSize()
 	}
 
-	if proto != "udp" {
+	if proto != ProtoUDP {
 		return dns.MaxMsgSize
 	}
 
@@ -220,14 +241,15 @@ func dnsSize(proto string, r *dns.Msg) int {
 		return dns.MinMsgSize
 	}
 
-	// normalize size
+	// normalize size.
 	return int(size)
 }
 
-// readPrefixed -- reads a DNS message with a 2-byte prefix containing message length
-func readPrefixed(conn net.Conn) ([]byte, error) {
+// readPrefixed reads a DNS message with a 2-byte prefix containing message
+// length.  conn must not be nil.
+func readPrefixed(conn net.Conn) (b []byte, err error) {
 	l := make([]byte, 2)
-	_, err := conn.Read(l)
+	_, err = conn.Read(l)
 	if err != nil {
 		return nil, err
 	}
@@ -246,18 +268,18 @@ func readPrefixed(conn net.Conn) ([]byte, error) {
 	return buf, nil
 }
 
-// writePrefixed -- write a DNS message to a TCP connection
-// it first writes a 2-byte prefix followed by the message itself
-func writePrefixed(b []byte, conn net.Conn) error {
+// writePrefixed writes a prefixed DNS message to a TCP connection.  conn must
+// not be nil.
+func writePrefixed(b []byte, conn net.Conn) (err error) {
 	l := make([]byte, 2)
 	binary.BigEndian.PutUint16(l, uint16(len(b)))
-	_, err := (&net.Buffers{l, b}).WriteTo(conn)
+	_, err = (&net.Buffers{l, b}).WriteTo(conn)
 
 	return err
 }
 
-// isConnClosed - checks if the error signals of a closed server connecting
-func isConnClosed(err error) bool {
+// isConnClosed checks if the error signals a closed server connection.
+func isConnClosed(err error) (ok bool) {
 	if err == nil {
 		return false
 	}

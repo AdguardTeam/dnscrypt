@@ -9,41 +9,35 @@ import (
 
 const defaultTimeout = 10 * time.Second
 
-// Handler is implemented by any value that implements ServeDNS.
+// Handler describes DNS handlers.
 type Handler interface {
-	ServeDNS(rw ResponseWriter, r *dns.Msg) error
+	// ServeDNS handles DNS requests.  rw and r must not be nil.
+	//
+	// TODO(f.setrakov): Add context.
+	ServeDNS(rw ResponseWriter, r *dns.Msg) (err error)
 }
 
-// ResponseWriter is the interface that needs to be implemented for different protocols
+// ResponseWriter describes response writer for various protocols.
 type ResponseWriter interface {
-	LocalAddr() net.Addr       // LocalAddr - local socket address
-	RemoteAddr() net.Addr      // RemoteAddr - remote client socket address
-	WriteMsg(m *dns.Msg) error // WriteMsg - writes response message to the client
+	// LocalAddr returns local socket address.
+	LocalAddr() (addr net.Addr)
+
+	// RemoteAddr returns remote client socket address.
+	RemoteAddr() (addr net.Addr)
+
+	// WriteMsg writes response message to the client.  m must not be nil.
+	WriteMsg(m *dns.Msg) (err error)
 }
 
-// DefaultHandler is the default Handler implementation
-// that is used by Server if custom handler is not configured
-var DefaultHandler Handler = &defaultHandler{
-	udpClient: &dns.Client{
-		Net:     "udp",
-		Timeout: defaultTimeout,
-	},
-	tcpClient: &dns.Client{
-		Net:     "tcp",
-		Timeout: defaultTimeout,
-	},
-	addr: "94.140.14.140:53",
-}
-
+// defaultHandler is a default implementation of the [Handler] interface.
 type defaultHandler struct {
 	udpClient *dns.Client
 	tcpClient *dns.Client
 	addr      string
 }
 
-// ServeDNS implements Handler interface
-func (h *defaultHandler) ServeDNS(rw ResponseWriter, r *dns.Msg) error {
-	// Google DNS
+// ServeDNS implements the [Handler] interface for *defaultHandler.
+func (h *defaultHandler) ServeDNS(rw ResponseWriter, r *dns.Msg) (err error) {
 	res, _, err := h.udpClient.Exchange(r, h.addr)
 	if err != nil {
 		return err
@@ -57,4 +51,18 @@ func (h *defaultHandler) ServeDNS(rw ResponseWriter, r *dns.Msg) error {
 	}
 
 	return rw.WriteMsg(res)
+}
+
+// DefaultHandler is the default [Handler] implementation that is used by
+// [Server] if custom handler is not configured.
+var DefaultHandler Handler = &defaultHandler{
+	udpClient: &dns.Client{
+		Net:     string(ProtoUDP),
+		Timeout: defaultTimeout,
+	},
+	tcpClient: &dns.Client{
+		Net:     string(ProtoTCP),
+		Timeout: defaultTimeout,
+	},
+	addr: "94.140.14.140:53",
 }

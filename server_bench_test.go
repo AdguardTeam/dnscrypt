@@ -12,14 +12,29 @@ import (
 )
 
 func BenchmarkServeUDP(b *testing.B) {
-	benchmarkServe(b, "udp")
+	benchmarkServe(b, ProtoUDP)
+
+	// Most recent results:
+	//	goos: darwin
+	//	goarch: arm64
+	//	pkg: github.com/AdguardTeam/dnscrypt
+	//	cpu: Apple M4 Pro
+	//	BenchmarkServeUDP-14    	    9333	    126311 ns/op	    6681 B/op	      61 allocs/op
+	//	PASS
+	//	ok  	github.com/AdguardTeam/dnscrypt	2.052s
 }
 
 func BenchmarkServeTCP(b *testing.B) {
-	benchmarkServe(b, "tcp")
+	benchmarkServe(b, ProtoTCP)
+	// Most recent results:
+	//	goos: darwin
+	//	goarch: arm64
+	//	pkg: github.com/AdguardTeam/dnscrypt
+	//	cpu: Apple M4 Pro
+	//	BenchmarkServeTCP-14    	   10113	    115749 ns/op	    5568 B/op	      65 allocs/op
 }
 
-func benchmarkServe(b *testing.B, network string) {
+func benchmarkServe(b *testing.B, proto Proto) {
 	srv := newTestServer(b, &testHandler{})
 	b.Cleanup(func() {
 		err := srv.Close()
@@ -28,11 +43,11 @@ func benchmarkServe(b *testing.B, network string) {
 
 	client := &Client{
 		Timeout: 1 * time.Second,
-		Net:     network,
+		Proto:   proto,
 	}
 
 	serverAddr := fmt.Sprintf("127.0.0.1:%d", srv.UDPAddr().Port)
-	if network == "tcp" {
+	if proto == ProtoTCP {
 		serverAddr = fmt.Sprintf("127.0.0.1:%d", srv.TCPAddr().Port)
 	}
 
@@ -46,7 +61,7 @@ func benchmarkServe(b *testing.B, network string) {
 	require.NoError(b, err)
 	require.NotNil(b, ri)
 
-	conn, err := net.Dial(network, stamp.ServerAddrStr)
+	conn, err := net.Dial(string(proto), stamp.ServerAddrStr)
 	require.NoError(b, err)
 
 	var resp *dns.Msg

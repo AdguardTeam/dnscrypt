@@ -3,6 +3,8 @@ package xsecretbox
 import (
 	"bytes"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestSecretbox(t *testing.T) {
@@ -18,9 +20,7 @@ func TestSecretbox(t *testing.T) {
 
 	dst[0]++
 	_, err = Open(nil, nonce[:], dst[:], key[:])
-	if err == nil {
-		t.Errorf("tag validation failed")
-	}
+	require.Error(t, err)
 
 	_, _ = SharedKey(key, key)
 }

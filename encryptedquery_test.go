@@ -17,11 +17,9 @@ func TestDNSCryptQueryEncryptDecryptXChacha20Poly1305(t *testing.T) {
 }
 
 func testDNSCryptQueryEncryptDecrypt(t *testing.T, esVersion CryptoConstruction) {
-	// Generate the secret/public pairs
 	clientSecretKey, clientPublicKey := generateRandomKeyPair()
 	serverSecretKey, serverPublicKey := generateRandomKeyPair()
 
-	// Generate client shared key
 	clientSharedKey, err := computeSharedKey(esVersion, &clientSecretKey, &serverPublicKey)
 	require.NoError(t, err)
 
@@ -34,24 +32,20 @@ func testDNSCryptQueryEncryptDecrypt(t *testing.T, esVersion CryptoConstruction)
 		ClientMagic: clientMagic,
 	}
 
-	// Generate random packet
 	packet := make([]byte, 100)
 	_, _ = rand.Read(packet[:])
 
-	// Encrypt it
 	encrypted, err := q1.Encrypt(packet, clientSharedKey)
 	require.NoError(t, err)
 
-	// Now let's try decrypting it
 	q2 := EncryptedQuery{
 		EsVersion:   esVersion,
 		ClientMagic: clientMagic,
 	}
 
-	// Decrypt it
 	decrypted, err := q2.Decrypt(encrypted, serverSecretKey)
 	require.NoError(t, err)
 
-	// Check that packet is the same
+	// Check that packet is the same.
 	require.True(t, bytes.Equal(packet, decrypted))
 }

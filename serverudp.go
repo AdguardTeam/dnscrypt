@@ -2,6 +2,7 @@ package dnscrypt
 
 import (
 	"bytes"
+	"fmt"
 	"log/slog"
 	"net"
 	"runtime"
@@ -15,34 +16,48 @@ import (
 	"golang.org/x/net/ipv6"
 )
 
-type encryptionFunc func(m *dns.Msg, q EncryptedQuery) ([]byte, error)
+// encryptionFunc is a function for encrypting server response.
+type encryptionFunc func(m *dns.Msg, q EncryptedQuery) (encrypted []byte, err error)
 
-// UDPResponseWriter is the ResponseWriter implementation for UDP
+// UDPResponseWriter is the implementation of the [ResponseWriter] interface for
+// UDP.
 type UDPResponseWriter struct {
-	udpConn *net.UDPConn    // UDP connection
-	sess    *dns.SessionUDP // SessionUDP (necessary to use dns.WriteToSessionUDP)
-	logger  *slog.Logger
-	req     *dns.Msg       // DNS query that was processed
-	encrypt encryptionFunc // DNSCrypt encryption function
-	query   EncryptedQuery // DNSCrypt query properties
+	// udpConn contains UDP connection.  It must not be nil.
+	udpConn *net.UDPConn
+
+	// sess is the UDP session.  It must not be nil.
+	sess *dns.SessionUDP
+
+	// logger is used for logging UDP response writer operations.  It must not
+	// be nil.
+	logger *slog.Logger
+
+	// req contains processed DNS query.
+	req *dns.Msg
+
+	// encrypt contains DNSCrypt encryption function.
+	encrypt encryptionFunc
+
+	// query contains DNSCrypt query properties.
+	query EncryptedQuery
 }
 
 // type check
 var _ ResponseWriter = &UDPResponseWriter{}
 
-// LocalAddr is the server socket local address
-func (w *UDPResponseWriter) LocalAddr() net.Addr {
+// LocalAddr implements the [ResponseWriter] interface for *UDPResponseWriter.
+func (w *UDPResponseWriter) LocalAddr() (addr net.Addr) {
 	return w.udpConn.LocalAddr()
 }
 
-// RemoteAddr is the client's address
-func (w *UDPResponseWriter) RemoteAddr() net.Addr {
+// RemoteAddr implements the [ResponseWriter] interface for *UDPResponseWriter.
+func (w *UDPResponseWriter) RemoteAddr() (addr net.Addr) {
 	return w.sess.RemoteAddr()
 }
 
-// WriteMsg writes DNS message to the client
-func (w *UDPResponseWriter) WriteMsg(m *dns.Msg) error {
-	normalize("udp", w.req, m)
+// WriteMsg implements the [ResponseWriter] interface for *UDPResponseWriter.
+func (w *UDPResponseWriter) WriteMsg(m *dns.Msg) (err error) {
+	normalize(ProtoUDP, w.req, m)
 
 	res, err := w.encrypt(m, w.query)
 	if err != nil {
@@ -56,25 +71,25 @@ func (w *UDPResponseWriter) WriteMsg(m *dns.Msg) error {
 	return err
 }
 
-// ServeUDP listens to UDP connections, queries are then processed by Server.Handler.
-// It blocks the calling goroutine and to stop it you need to close the listener
-// or call Server.Shutdown.
-func (s *Server) ServeUDP(l *net.UDPConn) error {
-	err := s.prepareServeUDP(l)
+// ServeUDP implements the [ServerDNSCrypt] interface for *Server.  It blocks
+// the calling goroutine and to stop it you need to close the listener or call
+// [Server.Shutdown].  l must not be nil.
+func (s *Server) ServeUDP(l *net.UDPConn) (err error) {
+	err = s.prepareServeUDP(l)
 	if err != nil {
 		return err
 	}
 
-	// Tracks UDP handling goroutines
+	// Tracks UDP handling goroutines.
 	udpWg := &sync.WaitGroup{}
 	defer s.cleanUpUDP(udpWg, l)
 
-	// Track active goroutine
+	// Track active goroutine.
 	s.wg.Add(1)
 
 	s.logger().Info("entering DNSCrypt UDP listening loop", "listen_addr", l.LocalAddr())
 
-	// Serialize the cert right away and prepare it to be sent to the client
+	// Serialize the cert right away and prepare it to be sent to the client.
 	certTxt, err := s.getCertTXT()
 	if err != nil {
 		return err
@@ -84,7 +99,7 @@ func (s *Server) ServeUDP(l *net.UDPConn) error {
 		var b []byte
 		var sess *dns.SessionUDP
 		b, sess, err = s.readUDPMsg(l)
-		// Check the error code and exit loop if necessary
+		// Check the error code and exit loop if necessary.
 		if err != nil {
 			if !s.isStarted() {
 				// Stopped gracefully
@@ -93,7 +108,8 @@ func (s *Server) ServeUDP(l *net.UDPConn) error {
 
 			var netErr net.Error
 			if errors.As(err, &netErr) && netErr.Timeout() {
-				// Note that timeout errors will be here (i.e. hitting ReadDeadline)
+				// Note that timeout errors will be here (i.e. hitting
+				// ReadDeadline).
 				continue
 			}
 
@@ -107,7 +123,7 @@ func (s *Server) ServeUDP(l *net.UDPConn) error {
 		}
 
 		if len(b) < minDNSPacketSize {
-			// Ignore the packets that are too short
+			// Ignore the packets that are too short.
 			continue
 		}
 
@@ -121,83 +137,76 @@ func (s *Server) ServeUDP(l *net.UDPConn) error {
 	return nil
 }
 
-// prepareServeUDP prepares the server and listener to serving DNSCrypt
+// prepareServeUDP prepares the server and listener for DNSCrypt service.  l
+// must not be nil.
 func (s *Server) prepareServeUDP(l *net.UDPConn) (err error) {
-	// Check that server is properly configured
 	err = s.validate()
 	if err != nil {
 		return err
 	}
 
-	// set UDP options to allow receiving OOB data
 	err = setUDPSocketOptions(l)
 	if err != nil {
 		return err
 	}
 
-	// Protect shutdown-related fields
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	s.initOnce.Do(s.init)
 
-	// Mark the server as started.
-	// Note that we don't check if it was started before as
+	// NOTE: We do not check whether the server has already been started, as
 	// Serve* methods can be called multiple times.
 	s.started = true
 
-	// Track an active UDP listener
+	// Track an active UDP listener.
 	s.udpListeners[l] = struct{}{}
 
 	return err
 }
 
-// cleanUpUDP waits until all UDP messages before cleaning up
+// cleanUpUDP waits until all UDP messages before cleaning up.  udpWg and l must
+// not be nil.
 func (s *Server) cleanUpUDP(udpWg *sync.WaitGroup, l *net.UDPConn) {
-	// Wait until UDP messages are processed
 	udpWg.Wait()
 
-	// Not using it anymore so can be removed from the active listeners
 	s.lock.Lock()
 	delete(s.udpListeners, l)
 	s.lock.Unlock()
 
-	// The work is finished
 	s.wg.Done()
 }
 
-// readUDPMsg reads incoming UDP message
-func (s *Server) readUDPMsg(l *net.UDPConn) ([]byte, *dns.SessionUDP, error) {
-	_ = l.SetReadDeadline(time.Now().Add(defaultReadTimeout))
-	b := make([]byte, s.UDPSize)
-	n, sess, err := dns.ReadFromSessionUDP(l, b)
+// readUDPMsg reads incoming UDP message.  l must not be nil.
+func (s *Server) readUDPMsg(l *net.UDPConn) (msg []byte, sess *dns.SessionUDP, err error) {
+	err = l.SetReadDeadline(time.Now().Add(defaultReadTimeout))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("setting read deadline: %w", err)
 	}
 
-	return b[:n], sess, err
+	msg = make([]byte, s.UDPSize)
+	n, sess, err := dns.ReadFromSessionUDP(l, msg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("reading from udp session: %w", err)
+	}
+
+	return msg[:n], sess, err
 }
 
-// serveUDPMsg handles incoming DNS message
+// serveUDPMsg handles incoming DNS message.  sess and l must not be nil.
 func (s *Server) serveUDPMsg(b []byte, certTxt string, sess *dns.SessionUDP, l *net.UDPConn) {
-	// First of all, check for "ClientMagic" in the incoming query
 	if !bytes.Equal(b[:clientMagicSize], s.ResolverCert.ClientMagic[:]) {
-		// If there's no ClientMagic in the packet, we assume this
-		// is a plain DNS query requesting the certificate data
 		reply, err := s.handleHandshake(b, certTxt)
 		if err != nil {
 			s.logger().Debug("failed to process a plain DNS query", slogutil.KeyError, err)
+
+			return
 		}
 
-		if err == nil {
-			// Ignore errors, we don't care and can't handle them anyway
-			_, _ = dns.WriteToSessionUDP(l, reply, sess)
-		}
+		_, _ = dns.WriteToSessionUDP(l, reply, sess)
 
 		return
 	}
 
-	// If we got here, this is an encrypted DNSCrypt message
-	// We should decrypt it first to get the plain DNS query
 	m, q, err := s.decrypt(b)
 	if err == nil {
 		rw := &UDPResponseWriter{
@@ -223,15 +232,16 @@ func (s *Server) serveUDPMsg(b []byte, certTxt string, sess *dns.SessionUDP, l *
 	}
 }
 
-// setUDPSocketOptions method is necessary to be able to use dns.ReadFromSessionUDP / dns.WriteToSessionUDP
-func setUDPSocketOptions(conn *net.UDPConn) error {
+// setUDPSocketOptions configures the UDP socket for use with
+// [dns.ReadFromSessionUDP] and [dns.WriteToSessionUDP].  conn must not be nil.
+func setUDPSocketOptions(conn *net.UDPConn) (err error) {
 	if runtime.GOOS == "windows" {
 		return nil
 	}
 
-	// We don't know if this a IPv4-only, IPv6-only or a IPv4-and-IPv6 connection.
-	// Try enabling receiving of ECN and packet info for both IP versions.
-	// We expect at least one of those syscalls to succeed.
+	// We don't know if this a IPv4-only, IPv6-only or a IPv4-and-IPv6
+	// connection.  Try enabling receiving of ECN and packet info for both IP
+	// versions.  We expect at least one of those syscalls to succeed.
 	err6 := ipv6.NewPacketConn(conn).SetControlMessage(ipv6.FlagDst|ipv6.FlagInterface, true)
 	err4 := ipv4.NewPacketConn(conn).SetControlMessage(ipv4.FlagDst|ipv4.FlagInterface, true)
 	if err6 != nil && err4 != nil {
