@@ -2,8 +2,8 @@ package dnscrypt
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/binary"
-	"math/rand"
 	"time"
 
 	"github.com/AdguardTeam/dnscrypt/xsecretbox"
@@ -25,11 +25,12 @@ type EncryptedResponse struct {
 }
 
 // Encrypt encrypts the server response.  r.EsVersion and r.Nonce must be set.
+//
+// TODO(f.setrakov): Improve error handling.
 func (r *EncryptedResponse) Encrypt(
 	packet []byte,
 	sharedKey [sharedKeySize]byte,
 ) (response []byte, err error) {
-	// Generate nonce.
 	_, _ = rand.Read(r.Nonce[12:16])
 	binary.BigEndian.PutUint64(r.Nonce[16:nonceSize], uint64(time.Now().UnixNano()))
 

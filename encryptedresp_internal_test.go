@@ -2,7 +2,7 @@ package dnscrypt
 
 import (
 	"bytes"
-	"math/rand"
+	"crypto/rand"
 	"testing"
 
 	"github.com/AdguardTeam/dnscrypt/xsecretbox"

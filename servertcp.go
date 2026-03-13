@@ -2,6 +2,7 @@ package dnscrypt
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log/slog"
 	"net"
@@ -48,12 +49,12 @@ func (w *TCPResponseWriter) RemoteAddr() (addr net.Addr) {
 }
 
 // WriteMsg implements the [ResponseWriter] interface for *TCPResponseWriter.
-func (w *TCPResponseWriter) WriteMsg(m *dns.Msg) (err error) {
+func (w *TCPResponseWriter) WriteMsg(ctx context.Context, m *dns.Msg) (err error) {
 	normalize(ProtoTCP, w.req, m)
 
 	res, err := w.encrypt(m, w.query)
 	if err != nil {
-		w.logger.Debug("failed to encrypt the DNS query", slogutil.KeyError, err)
+		w.logger.DebugContext(ctx, "failed to encrypt the DNS query", slogutil.KeyError, err)
 
 		return err
 	}
@@ -61,25 +62,22 @@ func (w *TCPResponseWriter) WriteMsg(m *dns.Msg) (err error) {
 	return writePrefixed(res, w.tcpConn)
 }
 
-// ServeTCP implements the [ServerDNSCrypt] interface for *Server.  It blocks
-// the calling goroutine and to stop it you need to close the listener or call
+// ServeTCP listens for TCP connections and handles them.  It blocks the calling
+// goroutine and to stop it you need to close the listener or call
 // [Server.Shutdown].  l must not be nil.
-func (s *Server) ServeTCP(l net.Listener) (err error) {
+func (s *Server) ServeTCP(ctx context.Context, l net.Listener) (err error) {
 	err = s.prepareServeTCP(l)
 	if err != nil {
 		return err
 	}
 
-	s.logger().Info("entering DNSCrypt TCP listening loop", "listenAddr", l.Addr())
+	s.logger.InfoContext(ctx, "entering DNSCrypt TCP listening loop", "listenAddr", l.Addr())
 
-	// Tracks TCP connection handling goroutines.
 	tcpWg := &sync.WaitGroup{}
 	defer s.cleanUpTCP(tcpWg, l)
 
-	// Track active goroutine.
 	s.wg.Add(1)
 
-	// Serialize the cert right away and prepare it to be sent to the client.
 	certTxt, err := s.getCertTXT()
 	if err != nil {
 		return err
@@ -88,24 +86,20 @@ func (s *Server) ServeTCP(l net.Listener) (err error) {
 	for s.isStarted() {
 		var conn net.Conn
 		conn, err = l.Accept()
-		// Check the error code and exit loop if necessary.
 		if err != nil {
 			if !s.isStarted() {
-				// Stopped gracefully.
 				break
 			}
 
 			var netErr net.Error
 			if errors.As(err, &netErr) && netErr.Timeout() {
-				// Note that timeout errors will be here (i.e. hitting
-				// ReadDeadline).
 				continue
 			}
 
 			if isConnClosed(err) {
-				s.logger().Info("TCP listener closed, exiting loop")
+				s.logger.InfoContext(ctx, "TCP listener closed, exiting loop")
 			} else {
-				s.logger().Info("got error when reading from UDP listen", slogutil.KeyError, err)
+				s.logger.InfoContext(ctx, "got error when reading from UDP listen", slogutil.KeyError, err)
 			}
 
 			break
@@ -118,7 +112,7 @@ func (s *Server) ServeTCP(l net.Listener) (err error) {
 
 		tcpWg.Add(1)
 		go func() {
-			_ = s.handleTCPConnection(conn, certTxt)
+			_ = s.handleTCPConnection(ctx, conn, certTxt)
 
 			_ = conn.Close()
 			s.lock.Lock()
@@ -165,13 +159,18 @@ func (s *Server) cleanUpTCP(tcpWg *sync.WaitGroup, l net.Listener) {
 
 // handleTCPMsg handles a single TCP message.  If this method returns error
 // the connection will be closed.  conn must not be nil.
-func (s *Server) handleTCPMsg(b []byte, conn net.Conn, certTxt string) (err error) {
+func (s *Server) handleTCPMsg(
+	ctx context.Context,
+	b []byte,
+	conn net.Conn,
+	certTxt string,
+) (err error) {
 	if len(b) < minDNSPacketSize {
 		// Ignore the packets that are too short.
 		return ErrTooShort
 	}
 
-	if !bytes.Equal(b[:clientMagicSize], s.ResolverCert.ClientMagic[:]) {
+	if !bytes.Equal(b[:clientMagicSize], s.resolverCert.ClientMagic[:]) {
 		var reply []byte
 		reply, err = s.handleHandshake(b, certTxt)
 		if err != nil {
@@ -196,10 +195,10 @@ func (s *Server) handleTCPMsg(b []byte, conn net.Conn, certTxt string) (err erro
 		encrypt: s.encrypt,
 		req:     m,
 		query:   q,
-		logger:  s.logger(),
+		logger:  s.logger,
 	}
 
-	err = s.serveDNS(rw, m)
+	err = s.serveDNS(ctx, rw, m)
 	if err != nil {
 		return fmt.Errorf("failed to process a DNS query: %w", err)
 	}
@@ -209,7 +208,13 @@ func (s *Server) handleTCPMsg(b []byte, conn net.Conn, certTxt string) (err erro
 
 // handleTCPConnection handles all queries that are coming to the specified TCP
 // connection.  conn must not be nil.
-func (s *Server) handleTCPConnection(conn net.Conn, certTxt string) (err error) {
+//
+// TODO(f.setrakov): Improve error handling.
+func (s *Server) handleTCPConnection(
+	ctx context.Context,
+	conn net.Conn,
+	certTxt string,
+) (err error) {
 	timeout := defaultReadTimeout
 
 	for s.isStarted() {
@@ -221,9 +226,9 @@ func (s *Server) handleTCPConnection(conn net.Conn, certTxt string) (err error) 
 			return err
 		}
 
-		err = s.handleTCPMsg(b, conn, certTxt)
+		err = s.handleTCPMsg(ctx, b, conn, certTxt)
 		if err != nil {
-			s.logger().Debug("failed to process a DNS query", slogutil.KeyError, err)
+			s.logger.DebugContext(ctx, "failed to process a DNS query", slogutil.KeyError, err)
 
 			return err
 		}

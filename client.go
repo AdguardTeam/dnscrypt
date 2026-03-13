@@ -1,36 +1,20 @@
 package dnscrypt
 
 import (
+	"cmp"
+	"context"
 	"crypto/ed25519"
 	"encoding/binary"
 	"fmt"
 	"log/slog"
 	"net"
 	"strings"
-	"time"
 
 	"github.com/AdguardTeam/golibs/errors"
 	"github.com/AdguardTeam/golibs/logutil/slogutil"
 	"github.com/ameshkov/dnsstamps"
 	"github.com/miekg/dns"
 )
-
-// Client is a DNSCrypt resolver client.
-type Client struct {
-	// Logger is a logger instance for Client.  If not set, slog.Default()
-	// will be used.
-	Logger *slog.Logger
-
-	// Proto is the base network protocol.
-	Proto Proto
-
-	// Timeout is the read/write timeout.
-	Timeout time.Duration
-
-	// UDPSize is the maximum size of a DNS response (or query) this client
-	// can send or receive.  If not set, we use dns.MinMsgSize by default.
-	UDPSize int
-}
 
 // ResolverInfo contains DNSCrypt resolver information necessary for
 // decryption/encryption.
@@ -60,11 +44,43 @@ type ResolverInfo struct {
 	PublicKey [keySize]byte
 }
 
-// Dial fetches and validates DNSCrypt certificate from the given server.
+// ClientConfig is the configuration structure for [Client].
+type ClientConfig struct {
+	// Logger is a logger instance for Client.  If not set, slog.Default()
+	// will be used.
+	Logger *slog.Logger
+
+	// Proto is the base network protocol.
+	Proto Proto
+
+	// UDPSize is the maximum size of a DNS response (or query) this client
+	// can send or receive.  If not set, we use [dns.MinMsgSize] by default.
+	UDPSize int
+}
+
+// Client is a DNSCrypt resolver client.
+type Client struct {
+	logger  *slog.Logger
+	dialer  *net.Dialer
+	proto   Proto
+	udpSize int
+}
+
+// NewClient returns properly initialized *Client.  c must be non-nil and valid.
+func NewClient(conf *ClientConfig) (c *Client) {
+	return &Client{
+		logger:  cmp.Or(conf.Logger, slog.Default()),
+		dialer:  &net.Dialer{},
+		proto:   conf.Proto,
+		udpSize: cmp.Or(conf.UDPSize, dns.MinMsgSize),
+	}
+}
+
+// DialContext fetches and validates DNSCrypt certificate from the given server.
 // Data received during this call is then used for DNS requests
 // encryption/decryption.  stampStr is an sdns:// address which is parsed using
 // go-dnsstamps package.
-func (c *Client) Dial(stampStr string) (info *ResolverInfo, err error) {
+func (c *Client) DialContext(ctx context.Context, stampStr string) (info *ResolverInfo, err error) {
 	stamp, err := dnsstamps.NewServerStampFromString(stampStr)
 	if err != nil {
 		// Invalid SDNS stamp.
@@ -75,31 +91,29 @@ func (c *Client) Dial(stampStr string) (info *ResolverInfo, err error) {
 		return nil, ErrInvalidDNSStamp
 	}
 
-	return c.DialStamp(stamp)
+	return c.DialStampContext(ctx, stamp)
 }
 
-// DialStamp fetches and validates DNSCrypt certificate from the given server.
-// Data received during this call is then used for DNS requests
+// DialStampContext fetches and validates DNSCrypt certificate from the given
+// server.  Data received during this call is then used for DNS requests
 // encryption/decryption.
-func (c *Client) DialStamp(stamp dnsstamps.ServerStamp) (info *ResolverInfo, err error) {
+func (c *Client) DialStampContext(
+	ctx context.Context,
+	stamp dnsstamps.ServerStamp,
+) (info *ResolverInfo, err error) {
 	info = &ResolverInfo{}
-
-	// Generate the secret/public pair.
 	info.SecretKey, info.PublicKey = generateRandomKeyPair()
 
-	// Set the provider properties.
 	info.ServerPublicKey = stamp.ServerPk
 	info.ServerAddress = stamp.ServerAddrStr
 	info.ProviderName = stamp.ProviderName
 
-	cert, err := c.fetchCert(stamp)
+	cert, err := c.fetchCert(ctx, stamp)
 	if err != nil {
 		return nil, err
 	}
 
 	info.ResolverCert = cert
-
-	// Compute shared key that we'll use to encrypt/decrypt messages.
 	sharedKey, err := computeSharedKey(cert.EsVersion, &info.SecretKey, &cert.ResolverPk)
 	if err != nil {
 		return nil, err
@@ -110,24 +124,28 @@ func (c *Client) DialStamp(stamp dnsstamps.ServerStamp) (info *ResolverInfo, err
 	return info, nil
 }
 
-// Exchange performs a synchronous DNS query to the specified DNSCrypt server
-// and returns a DNS response.  This method creates a new network connection
-// for every call so avoid using it for TCP.  DNSCrypt cert needs to be
-// fetched and validated prior to this call using the [Client.DialStamp] method.
-// m and info must not be nil.
-func (c *Client) Exchange(m *dns.Msg, info *ResolverInfo) (resp *dns.Msg, err error) {
+// ExchangeContext performs a synchronous DNS query to the specified DNSCrypt
+// server and returns a DNS response.  This method creates a new network
+// connection for every call so avoid using it for TCP.  DNSCrypt cert needs to
+// be fetched and validated prior to this call using the
+// [Client.DialStampContext] method.  m and info must not be nil.
+func (c *Client) ExchangeContext(
+	ctx context.Context,
+	m *dns.Msg,
+	info *ResolverInfo,
+) (resp *dns.Msg, err error) {
 	proto := ProtoUDP
-	if c.Proto == ProtoTCP {
+	if c.proto == ProtoTCP {
 		proto = ProtoTCP
 	}
 
-	conn, err := net.Dial(string(proto), info.ServerAddress)
+	conn, err := c.dialer.DialContext(ctx, string(proto), info.ServerAddress)
 	if err != nil {
 		return nil, fmt.Errorf("dialing: %w", err)
 	}
 	defer func() { err = errors.WithDeferred(err, conn.Close()) }()
 
-	resp, err = c.ExchangeConn(conn, m, info)
+	resp, err = c.ExchangeConnContext(ctx, conn, m, info)
 	if err != nil {
 		return nil, fmt.Errorf("exchanging: %w", err)
 	}
@@ -135,11 +153,12 @@ func (c *Client) Exchange(m *dns.Msg, info *ResolverInfo) (resp *dns.Msg, err er
 	return resp, nil
 }
 
-// ExchangeConn performs a synchronous DNS query to the specified DNSCrypt
-// server and returns a DNS response.  DNSCrypt server information needs to be
-// fetched and validated prior to this call using the [Client.DialStamp] method.
-// conn, m, and info must not be nil.
-func (c *Client) ExchangeConn(
+// ExchangeConnContext performs a synchronous DNS query to the specified
+// DNSCrypt server and returns a DNS response.  DNSCrypt server information
+// needs to be fetched and validated prior to this call using the
+// [Client.DialStampContext] method.  conn, m, and info must not be nil.
+func (c *Client) ExchangeConnContext(
+	ctx context.Context,
 	conn net.Conn,
 	m *dns.Msg,
 	info *ResolverInfo,
@@ -149,12 +168,12 @@ func (c *Client) ExchangeConn(
 		return nil, err
 	}
 
-	err = c.writeQuery(conn, query)
+	err = c.writeQuery(ctx, conn, query)
 	if err != nil {
 		return nil, err
 	}
 
-	b, err := c.readResponse(conn)
+	b, err := c.readResponse(ctx, conn)
 	if err != nil {
 		return nil, err
 	}
@@ -169,13 +188,15 @@ func (c *Client) ExchangeConn(
 
 // writeQuery writes query to the network connection.  Depending on the
 // protocol we may write a 2-byte prefix or not.  conn must not be nil.
-func (c *Client) writeQuery(conn net.Conn, query []byte) (err error) {
-	if c.Timeout > 0 {
-		_ = conn.SetWriteDeadline(time.Now().Add(c.Timeout))
+//
+// TODO(f.setrakov): Improve error handling.
+func (c *Client) writeQuery(ctx context.Context, conn net.Conn, query []byte) (err error) {
+	deadline, ok := ctx.Deadline()
+	if ok {
+		_ = conn.SetWriteDeadline(deadline)
 	}
 
-	// Write to the connection.
-	if _, ok := conn.(*net.TCPConn); ok {
+	if _, ok = conn.(*net.TCPConn); ok {
 		l := make([]byte, 2)
 		binary.BigEndian.PutUint16(l, uint16(len(query)))
 		_, err = (&net.Buffers{l, query}).WriteTo(conn)
@@ -188,23 +209,21 @@ func (c *Client) writeQuery(conn net.Conn, query []byte) (err error) {
 
 // readResponse reads response from the network connection depending on the
 // protocol, we may read a 2-byte prefix or not.  conn must not be nil.
-func (c *Client) readResponse(conn net.Conn) (resp []byte, err error) {
-	if c.Timeout > 0 {
-		_ = conn.SetReadDeadline(time.Now().Add(c.Timeout))
+//
+// TODO(f.setrakov): Improve error handling.
+func (c *Client) readResponse(ctx context.Context, conn net.Conn) (resp []byte, err error) {
+	deadline, ok := ctx.Deadline()
+	if ok {
+		_ = conn.SetReadDeadline(deadline)
 	}
 
 	proto := ProtoUDP
-	if _, ok := conn.(*net.TCPConn); ok {
+	if _, ok = conn.(*net.TCPConn); ok {
 		proto = ProtoTCP
 	}
 
 	if proto == ProtoUDP {
-		bufSize := c.UDPSize
-		if bufSize == 0 {
-			bufSize = dns.MinMsgSize
-		}
-
-		resp = make([]byte, bufSize)
+		resp = make([]byte, c.udpSize)
 		var n int
 		n, err = conn.Read(resp)
 		if err != nil {
@@ -252,7 +271,7 @@ func (c *Client) decrypt(b []byte, info *ResolverInfo) (msg *dns.Msg, err error)
 		return nil, err
 	}
 
-	msg = new(dns.Msg)
+	msg = &dns.Msg{}
 	err = msg.Unpack(response)
 	if err != nil {
 		return nil, err
@@ -262,19 +281,21 @@ func (c *Client) decrypt(b []byte, info *ResolverInfo) (msg *dns.Msg, err error)
 }
 
 // fetchCert loads DNSCrypt cert from the specified server.
-func (c *Client) fetchCert(stamp dnsstamps.ServerStamp) (cert *Cert, err error) {
+func (c *Client) fetchCert(
+	ctx context.Context,
+	stamp dnsstamps.ServerStamp,
+) (cert *Cert, err error) {
 	providerName := stamp.ProviderName
 	if !strings.HasSuffix(providerName, ".") {
 		providerName = providerName + "."
 	}
 
-	query := new(dns.Msg)
+	query := &dns.Msg{}
 	query.SetQuestion(providerName, dns.TypeTXT)
-	// use 1252 as a UDPSize for this client to make sure the buffer is not too
-	// small.
-	client := dns.Client{Net: string(c.Proto), UDPSize: uint16(1252), Timeout: c.Timeout}
-	r, _, err := client.Exchange(query, stamp.ServerAddrStr)
+	client := dns.Client{Net: string(c.proto), UDPSize: uint16(defaultUDPSize)}
+	r, _, err := client.ExchangeContext(ctx, query, stamp.ServerAddrStr)
 	if err != nil {
+		// TODO(f.setrakov): Improve error wrapping.
 		return nil, err
 	}
 
@@ -290,9 +311,13 @@ func (c *Client) fetchCert(stamp dnsstamps.ServerStamp) (cert *Cert, err error) 
 			continue
 		}
 
-		cert, err = c.parseCert(stamp, currentCert, providerName, strings.Join(txt.Txt, ""))
+		cert, err = c.parseCert(ctx, stamp, currentCert, providerName, strings.Join(txt.Txt, ""))
 		if err != nil {
-			c.logger().Debug("bad cert", "provider", providerName, slogutil.KeyError, err)
+			c.logger.DebugContext(ctx,
+				"bad cert",
+				"provider", providerName,
+				slogutil.KeyError, err,
+			)
 
 			continue
 		} else if cert == nil {
@@ -315,6 +340,7 @@ func (c *Client) fetchCert(stamp dnsstamps.ServerStamp) (cert *Cert, err error) 
 // parseCert parses a certificate from its string form and returns it if it
 // has priority over currentCert.  currentCert must not be nil.
 func (c *Client) parseCert(
+	ctx context.Context,
 	stamp dnsstamps.ServerStamp,
 	currentCert *Cert,
 	providerName string,
@@ -328,12 +354,11 @@ func (c *Client) parseCert(
 		return nil, fmt.Errorf("deserializing cert for: %w", err)
 	}
 
-	c.logger().Debug(
+	c.logger.DebugContext(
+		ctx,
 		"fetched certificate",
-		"provider",
-		providerName,
-		"cert_serial",
-		cert.Serial,
+		"provider", providerName,
+		"cert_serial", cert.Serial,
 	)
 
 	if !cert.VerifyDate() {
@@ -345,7 +370,8 @@ func (c *Client) parseCert(
 	}
 
 	if cert.Serial < currentCert.Serial {
-		c.logger().Debug(
+		c.logger.DebugContext(
+			ctx,
 			"cert superseded by a previous certificate",
 			"provider",
 			providerName,
@@ -361,23 +387,21 @@ func (c *Client) parseCert(
 	}
 
 	if cert.EsVersion <= currentCert.EsVersion {
-		c.logger().Debug(
+		c.logger.DebugContext(
+			ctx,
 			"keeping the current cert es version",
-			"provider",
-			providerName,
+			"provider", providerName,
 		)
 
 		return nil, nil
 	}
 
-	c.logger().Debug(
+	c.logger.DebugContext(
+		ctx,
 		"upgrading the construction",
-		"provider",
-		providerName,
-		"es_version",
-		currentCert.EsVersion,
-		"new_es_version",
-		cert.EsVersion,
+		"provider", providerName,
+		"es_version", currentCert.EsVersion,
+		"new_es_version", cert.EsVersion,
 	)
 
 	return cert, nil
@@ -385,23 +409,9 @@ func (c *Client) parseCert(
 
 // maxQuerySize returns the maximum query size for the client.
 func (c *Client) maxQuerySize() (size int) {
-	if c.Proto == ProtoTCP {
+	if c.proto == ProtoTCP {
 		return dns.MaxMsgSize
 	}
 
-	if c.UDPSize > 0 {
-		return c.UDPSize
-	}
-
-	return dns.MinMsgSize
-}
-
-// logger returns the logger instance or slog.Default() if it was not
-// configured.
-func (c *Client) logger() (l *slog.Logger) {
-	if c.Logger == nil {
-		return slog.Default()
-	}
-
-	return c.Logger
+	return c.udpSize
 }

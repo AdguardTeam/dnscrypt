@@ -7,10 +7,13 @@ Here's how to create a simple DNSCrypt client:
 	stampStr := "sdns://AQMAAAAAAAAAETk0LjE0MC4xNC4xNDo1NDQzINErR_JS3PLCu_iZEIbq95zkSV2LFsigxDIuUso_OQhzIjIuZG5zY3J5cHQuZGVmYXVsdC5uczEuYWRndWFyZC5jb20"
 
 	// Initializing the DNSCrypt client
-	c := dnscrypt.Client{Net: dnscrypt.ProtoUDP, Timeout: 10 * time.Second}
+	c := dnscrypt.NewClient(&dnscrypt.ClientConfig{
+		Proto: dnscrypt.ProtoUDP,
+	})
 
 	// Fetching and validating the server certificate
-	resolverInfo, err := c.Dial(stampStr)
+	ctx := context.Background()
+	resolverInfo, err := c.DialContext(ctx, stampStr)
 	if err != nil {
 		return err
 	}
@@ -24,7 +27,7 @@ Here's how to create a simple DNSCrypt client:
 	}
 
 	// Get the DNS response
-	reply, err := c.Exchange(&req, resolverInfo)
+	reply, err := c.ExchangeContext(ctx, &req, resolverInfo)
 
 Here's how to run a DNSCrypt resolver:
 
@@ -39,11 +42,11 @@ Here's how to run a DNSCrypt resolver:
 		return err
 	}
 
-	s := &dnscrypt.Server{
+	s := &dnscrypt.NewServer(&dnscrypt.ServerConfig{
 		ProviderName: rc.ProviderName,
 		ResolverCert: cert,
 		Handler:      dnscrypt.DefaultHandler,
-	}
+	})
 
 	// Prepare TCP listener
 	tcpConn, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4zero, Port: 443})
@@ -57,8 +60,10 @@ Here's how to run a DNSCrypt resolver:
 		return err
 	}
 
+	ctx := context.Background()
+
 	// Start the server
-	go s.ServeUDP(udpConn)
-	go s.ServeTCP(tcpConn)
+	go s.ServeUDP(ctx, udpConn)
+	go s.ServeTCP(ctx, tcpConn)
 */
 package dnscrypt

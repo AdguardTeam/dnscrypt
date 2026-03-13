@@ -1,20 +1,20 @@
 package dnscrypt
 
 import (
+	"context"
 	"net"
 	"time"
 
 	"github.com/miekg/dns"
 )
 
+// defaultTimeout is the timeout for [DefaultHandler].
 const defaultTimeout = 10 * time.Second
 
 // Handler describes DNS handlers.
 type Handler interface {
 	// ServeDNS handles DNS requests.  rw and r must not be nil.
-	//
-	// TODO(f.setrakov): Add context.
-	ServeDNS(rw ResponseWriter, r *dns.Msg) (err error)
+	ServeDNS(ctx context.Context, rw ResponseWriter, r *dns.Msg) (err error)
 }
 
 // ResponseWriter describes response writer for various protocols.
@@ -26,7 +26,7 @@ type ResponseWriter interface {
 	RemoteAddr() (addr net.Addr)
 
 	// WriteMsg writes response message to the client.  m must not be nil.
-	WriteMsg(m *dns.Msg) (err error)
+	WriteMsg(ctx context.Context, m *dns.Msg) (err error)
 }
 
 // defaultHandler is a default implementation of the [Handler] interface.
@@ -37,20 +37,20 @@ type defaultHandler struct {
 }
 
 // ServeDNS implements the [Handler] interface for *defaultHandler.
-func (h *defaultHandler) ServeDNS(rw ResponseWriter, r *dns.Msg) (err error) {
-	res, _, err := h.udpClient.Exchange(r, h.addr)
+func (h *defaultHandler) ServeDNS(ctx context.Context, rw ResponseWriter, r *dns.Msg) (err error) {
+	res, _, err := h.udpClient.ExchangeContext(ctx, r, h.addr)
 	if err != nil {
 		return err
 	}
 
 	if res.Truncated {
-		res, _, err = h.tcpClient.Exchange(r, h.addr)
+		res, _, err = h.tcpClient.ExchangeContext(ctx, r, h.addr)
 		if err != nil {
 			return err
 		}
 	}
 
-	return rw.WriteMsg(res)
+	return rw.WriteMsg(ctx, res)
 }
 
 // DefaultHandler is the default [Handler] implementation that is used by

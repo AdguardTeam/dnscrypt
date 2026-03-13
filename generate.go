@@ -159,6 +159,8 @@ func HexDecodeKey(str string) (decoded []byte, err error) {
 }
 
 // generateRandomKeyPair generates a random key-pair.
+//
+// TODO(f.setrakov): Improve error handling.
 func generateRandomKeyPair() (privateKey, publicKey [keySize]byte) {
 	privateKey = [keySize]byte{}
 	publicKey = [keySize]byte{}

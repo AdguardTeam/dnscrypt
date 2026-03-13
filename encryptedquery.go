@@ -2,8 +2,8 @@ package dnscrypt
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/binary"
-	"math/rand"
 	"time"
 
 	"github.com/AdguardTeam/dnscrypt/xsecretbox"
@@ -38,6 +38,8 @@ type EncryptedQuery struct {
 
 // Encrypt encrypts the specified DNS query, returns encrypted data ready to be
 // sent.  q.EsVersion, q.ClientMagic and q.ClientPk must be set.
+//
+// TODO(f.setrakov): Improve error handling.
 func (q *EncryptedQuery) Encrypt(
 	packet []byte,
 	sharedKey [sharedKeySize]byte,

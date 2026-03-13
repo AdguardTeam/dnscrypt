@@ -6,51 +6,27 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AdguardTeam/golibs/testutil"
 	"github.com/ameshkov/dnsstamps"
 	"github.com/miekg/dns"
 	"github.com/stretchr/testify/require"
 )
 
-func TestParseStamp(t *testing.T) {
-	stampStr := "sdns://AgUAAAAAAAAAAAAOZG5zLmdvb2dsZS5jb20NL2V4cGVyaW1lbnRhbA"
-	stamp, err := dnsstamps.NewServerStampFromString(stampStr)
-
-	if err != nil || stamp.ProviderName == "" {
-		t.Fatalf("Could not parse stamp %s: %s", stampStr, err)
-	}
-
-	require.Equal(t, stampStr, stamp.String())
-	require.Equal(t, dnsstamps.StampProtoTypeDoH, stamp.Proto)
-	require.Equal(t, "dns.google.com", stamp.ProviderName)
-	require.Equal(t, "/experimental", stamp.Path)
-
-	stampStr = "sdns://AQMAAAAAAAAAETk0LjE0MC4xNC4xNDo1NDQzINErR_JS3PLCu_iZEIbq95zkSV2LFsigxDIuUso_OQhzIjIuZG5zY3J5cHQuZGVmYXVsdC5uczEuYWRndWFyZC5jb20"
-	stamp, err = dnsstamps.NewServerStampFromString(stampStr)
-
-	if err != nil || stamp.ProviderName == "" {
-		t.Fatalf("Could not parse stamp %s: %s", stampStr, err)
-	}
-
-	require.Equal(t, stampStr, stamp.String())
-	require.Equal(t, dnsstamps.StampProtoTypeDNSCrypt, stamp.Proto)
-	require.Equal(t, "2.dnscrypt.default.ns1.adguard.com", stamp.ProviderName)
-	require.Equal(t, "", stamp.Path)
-	require.Equal(t, "94.140.14.14:5443", stamp.ServerAddrStr)
-	require.Equal(t, keySize, len(stamp.ServerPk))
-}
-
+// TODO(f.setrakov): Remove external tests.
 func TestInvalidStamp(t *testing.T) {
-	client := Client{}
-	_, err := client.Dial("sdns://AQIAAAAAAAAAFDE")
+	client := newTestClient(nil)
+	ctx := testutil.ContextWithTimeout(t, testTimeout)
+	_, err := client.DialContext(ctx, "sdns://AQIAAAAAAAAAFDE")
 	require.NotNil(t, err)
 }
 
 func TestTimeoutOnDialError(t *testing.T) {
 	// AdGuard DNS pointing to a wrong IP.
 	stampStr := "sdns://AQIAAAAAAAAADDguOC44Ljg6NTQ0MyDRK0fyUtzywrv4mRCG6vec5EldixbIoMQyLlLKPzkIcyIyLmRuc2NyeXB0LmRlZmF1bHQubnMxLmFkZ3VhcmQuY29t"
-	client := Client{Timeout: 300 * time.Millisecond}
 
-	_, err := client.Dial(stampStr)
+	client := newTestClient(nil)
+	ctx := testutil.ContextWithTimeout(t, 300*time.Millisecond)
+	_, err := client.DialContext(ctx, stampStr)
 	require.NotNil(t, err)
 	require.True(t, os.IsTimeout(err))
 }
@@ -58,15 +34,16 @@ func TestTimeoutOnDialError(t *testing.T) {
 func TestTimeoutOnDialExchange(t *testing.T) {
 	// AdGuard DNS.
 	stampStr := "sdns://AQMAAAAAAAAAETk0LjE0MC4xNC4xNDo1NDQzINErR_JS3PLCu_iZEIbq95zkSV2LFsigxDIuUso_OQhzIjIuZG5zY3J5cHQuZGVmYXVsdC5uczEuYWRndWFyZC5jb20"
-	client := Client{Timeout: 300 * time.Millisecond}
+	client := newTestClient(nil)
 
-	serverInfo, err := client.Dial(stampStr)
+	ctx := testutil.ContextWithTimeout(t, 300*time.Millisecond)
+	serverInfo, err := client.DialContext(ctx, stampStr)
 	require.NoError(t, err)
 
 	serverInfo.ServerAddress = "8.8.8.8:5443"
 	req := createTestMessage()
 
-	_, err = client.Exchange(req, serverInfo)
+	_, err = client.ExchangeContext(ctx, req, serverInfo)
 
 	require.NotNil(t, err)
 	require.ErrorIs(t, err, os.ErrDeadlineExceeded)
@@ -101,11 +78,11 @@ func TestFetchCertPublicResolvers(t *testing.T) {
 			stamp, err := dnsstamps.NewServerStampFromString(tc.stampStr)
 			require.NoError(t, err)
 
-			c := &Client{
-				Proto:   ProtoUDP,
-				Timeout: time.Second * 5,
-			}
-			resolverInfo, err := c.DialStamp(stamp)
+			c := newTestClient(&ClientConfig{
+				Proto: ProtoUDP,
+			})
+			ctx := testutil.ContextWithTimeout(t, testTimeout)
+			resolverInfo, err := c.DialStampContext(ctx, stamp)
 			require.NoError(t, err)
 			require.NotNil(t, resolverInfo)
 			require.True(t, resolverInfo.ResolverCert.VerifyDate())
@@ -142,13 +119,14 @@ func TestExchangePublicResolvers(t *testing.T) {
 func checkDNSCryptServer(tb testing.TB, stampStr string, proto Proto) {
 	tb.Helper()
 
-	client := Client{Proto: proto, Timeout: 10 * time.Second}
-	resolverInfo, err := client.Dial(stampStr)
+	client := newTestClient(&ClientConfig{Proto: proto})
+	ctx := testutil.ContextWithTimeout(tb, testTimeout)
+	resolverInfo, err := client.DialContext(ctx, stampStr)
 	require.NoError(tb, err)
 
 	req := createTestMessage()
 
-	reply, err := client.Exchange(req, resolverInfo)
+	reply, err := client.ExchangeContext(ctx, req, resolverInfo)
 	require.NoError(tb, err)
 	assertTestMessageResponse(tb, reply)
 }
