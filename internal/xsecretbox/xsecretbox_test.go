@@ -3,7 +3,7 @@ package xsecretbox_test
 import (
 	"testing"
 
-	"github.com/AdguardTeam/dnscrypt/xsecretbox"
+	"github.com/AdguardTeam/dnscrypt/internal/xsecretbox"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/binary"
+	"fmt"
 	"time"
 
-	"github.com/AdguardTeam/dnscrypt/xsecretbox"
+	"github.com/AdguardTeam/dnscrypt/internal/xsecretbox"
 	"golang.org/x/crypto/nacl/secretbox"
 )
 
@@ -16,8 +17,8 @@ import (
 // <dnscrypt-query> ::= <client-magic> <client-pk> <client-nonce> <encrypted-query>
 // <encrypted-query> ::= AE(<shared-key> <client-nonce> <client-nonce-pad>, <client-query> <client-query-pad>)
 type EncryptedQuery struct {
-	// EsVersion contains used encryption.
-	EsVersion CryptoConstruction
+	// ESVersion contains used encryption.
+	ESVersion CryptoConstruction
 
 	// ClientMagic is a 8 byte identifier for the resolver certificate chosen by
 	// the client.
@@ -37,9 +38,7 @@ type EncryptedQuery struct {
 }
 
 // Encrypt encrypts the specified DNS query, returns encrypted data ready to be
-// sent.  q.EsVersion, q.ClientMagic and q.ClientPk must be set.
-//
-// TODO(f.setrakov): Improve error handling.
+// sent.  q.ESVersion, q.ClientMagic and q.ClientPk must be set.
 func (q *EncryptedQuery) Encrypt(
 	packet []byte,
 	sharedKey [SharedKeySize]byte,
@@ -54,7 +53,7 @@ func (q *EncryptedQuery) Encrypt(
 	padded := pad(packet)
 
 	nonce := q.Nonce
-	switch q.EsVersion {
+	switch q.ESVersion {
 	case XChacha20Poly1305:
 		query = xsecretbox.Seal(query, nonce[:], padded, sharedKey[:])
 	case XSalsa20Poly1305:
@@ -62,14 +61,14 @@ func (q *EncryptedQuery) Encrypt(
 		copy(xsalsaNonce[:], nonce[:])
 		query = secretbox.Seal(query, padded, &xsalsaNonce, &sharedKey)
 	default:
-		return nil, ErrEsVersion
+		return nil, ErrESVersion
 	}
 
 	return query, nil
 }
 
 // Decrypt decrypts the client query, returns decrypted DNS packet.
-// q.ClientMagic and q.EsVersion must be set.
+// q.ClientMagic and q.ESVersion must be set.
 func (q *EncryptedQuery) Decrypt(
 	query []byte,
 	serverSecretKey [KeySize]byte,
@@ -88,9 +87,9 @@ func (q *EncryptedQuery) Decrypt(
 	idx := clientMagicSize
 	copy(q.ClientPk[:KeySize], query[idx:idx+KeySize])
 
-	sharedKey, err := computeSharedKey(q.EsVersion, &serverSecretKey, &q.ClientPk)
+	sharedKey, err := computeSharedKey(q.ESVersion, &serverSecretKey, &q.ClientPk)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("computing shared key: %w", err)
 	}
 
 	idx = idx + KeySize
@@ -99,27 +98,42 @@ func (q *EncryptedQuery) Decrypt(
 	idx = idx + nonceSize/2
 	encryptedQuery := query[idx:]
 
-	switch q.EsVersion {
+	packet, err = q.decryptES(encryptedQuery, sharedKey)
+	if err != nil {
+		// Don't wrap the error as it is informative enough.
+		return nil, err
+	}
+
+	packet, err = unpad(packet)
+	if err != nil {
+		return nil, fmt.Errorf("remove packet padding: %w", err)
+	}
+
+	return packet, nil
+}
+
+// decryptES decrypts the query using the configured encryption method and the
+// given shared key.
+func (q *EncryptedQuery) decryptES(
+	query []byte,
+	sharedKey [xsecretbox.KeySize]byte,
+) (packet []byte, err error) {
+	switch q.ESVersion {
 	case XChacha20Poly1305:
-		packet, err = xsecretbox.Open(nil, q.Nonce[:], encryptedQuery, sharedKey[:])
+		packet, err = xsecretbox.Open(nil, q.Nonce[:], query, sharedKey[:])
 		if err != nil {
-			return nil, ErrInvalidQuery
+			return nil, fmt.Errorf("decrypting query: %s: %w", q.ESVersion, err)
 		}
 	case XSalsa20Poly1305:
 		var xsalsaServerNonce [24]byte
 		copy(xsalsaServerNonce[:], q.Nonce[:])
 		var ok bool
-		packet, ok = secretbox.Open(nil, encryptedQuery, &xsalsaServerNonce, &sharedKey)
+		packet, ok = secretbox.Open(nil, query, &xsalsaServerNonce, &sharedKey)
 		if !ok {
-			return nil, ErrInvalidQuery
+			return nil, fmt.Errorf("decrypting query: %s: %w", q.ESVersion, err)
 		}
 	default:
-		return nil, ErrEsVersion
-	}
-
-	packet, err = unpad(packet)
-	if err != nil {
-		return nil, ErrInvalidPadding
+		return nil, ErrESVersion
 	}
 
 	return packet, nil

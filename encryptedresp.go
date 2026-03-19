@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/binary"
+	"fmt"
 	"time"
 
-	"github.com/AdguardTeam/dnscrypt/xsecretbox"
+	"github.com/AdguardTeam/dnscrypt/internal/xsecretbox"
 	"golang.org/x/crypto/nacl/secretbox"
 )
 
@@ -16,17 +17,15 @@ import (
 // <dnscrypt-response> ::= <resolver-magic> <nonce> <encrypted-response>
 // <encrypted-response> ::= AE(<shared-key>, <nonce>, <resolver-response> <resolver-response-pad>)
 type EncryptedResponse struct {
-	// EsVersion is the encryption to use.
-	EsVersion CryptoConstruction
+	// ESVersion is the encryption to use.
+	ESVersion CryptoConstruction
 
 	// Nonce - <nonce> ::= <client-nonce> <resolver-nonce>
 	// <client-nonce> ::= the nonce sent by the client in the related query.
 	Nonce [nonceSize]byte
 }
 
-// Encrypt encrypts the server response.  r.EsVersion and r.Nonce must be set.
-//
-// TODO(f.setrakov): Improve error handling.
+// Encrypt encrypts the server response.  r.ESVersion and r.Nonce must be set.
 func (r *EncryptedResponse) Encrypt(
 	packet []byte,
 	sharedKey [SharedKeySize]byte,
@@ -40,7 +39,7 @@ func (r *EncryptedResponse) Encrypt(
 	padded := pad(packet)
 
 	nonce := r.Nonce
-	switch r.EsVersion {
+	switch r.ESVersion {
 	case XChacha20Poly1305:
 		response = xsecretbox.Seal(response, nonce[:], padded, sharedKey[:])
 	case XSalsa20Poly1305:
@@ -48,13 +47,13 @@ func (r *EncryptedResponse) Encrypt(
 		copy(xsalsaNonce[:], nonce[:])
 		response = secretbox.Seal(response, padded, &xsalsaNonce, &sharedKey)
 	default:
-		return nil, ErrEsVersion
+		return nil, ErrESVersion
 	}
 
 	return response, nil
 }
 
-// Decrypt decrypts the server response.  r.EsVersion must be set.
+// Decrypt decrypts the server response.  r.ESVersion must be set.
 func (r *EncryptedResponse) Decrypt(
 	response []byte,
 	sharedKey [SharedKeySize]byte,
@@ -72,11 +71,11 @@ func (r *EncryptedResponse) Decrypt(
 
 	copy(r.Nonce[:], response[resolverMagicSize:nonceSize+resolverMagicSize])
 	encryptedResponse := response[nonceSize+resolverMagicSize:]
-	switch r.EsVersion {
+	switch r.ESVersion {
 	case XChacha20Poly1305:
 		packet, err = xsecretbox.Open(nil, r.Nonce[:], encryptedResponse, sharedKey[:])
 		if err != nil {
-			return nil, ErrInvalidResponse
+			return nil, fmt.Errorf("encrypting query: %s: %w", r.ESVersion, err)
 		}
 	case XSalsa20Poly1305:
 		var xsalsaServerNonce [24]byte
@@ -84,15 +83,15 @@ func (r *EncryptedResponse) Decrypt(
 		var ok bool
 		packet, ok = secretbox.Open(nil, encryptedResponse, &xsalsaServerNonce, &sharedKey)
 		if !ok {
-			return nil, ErrInvalidResponse
+			return nil, fmt.Errorf("encrypting query: %s: %w", r.ESVersion, err)
 		}
 	default:
-		return nil, ErrEsVersion
+		return nil, ErrESVersion
 	}
 
 	packet, err = unpad(packet)
 	if err != nil {
-		return nil, ErrInvalidPadding
+		return nil, fmt.Errorf("removing packet padding: %w", err)
 	}
 
 	return packet, nil

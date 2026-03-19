@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"strings"
 	"time"
 
@@ -41,8 +42,8 @@ type ResolverConfig struct {
 	// ResolverSk.  This key is used to encrypt/decrypt DNS queries.
 	ResolverPk string `yaml:"resolver_public"`
 
-	// EsVersion is the crypto to use in this resolver.
-	EsVersion CryptoConstruction `yaml:"es_version"`
+	// ESVersion is the crypto to use in this resolver.
+	ESVersion CryptoConstruction `yaml:"es_version"`
 
 	// CertificateTTL is the time-to-live value for the certificate that is
 	// generated using this ResolverConfig.  If not set, we'll use 1 year by
@@ -63,17 +64,17 @@ func (rc *ResolverConfig) CreateCert() (cert *Cert, err error) {
 		Serial:    uint32(time.Now().Unix()),
 		NotAfter:  uint32(notAfter.Unix()),
 		NotBefore: uint32(time.Now().Unix()),
-		EsVersion: rc.EsVersion,
+		ESVersion: rc.ESVersion,
 	}
 
 	resolverPk, err := HexDecodeKey(rc.ResolverPk)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decoding public key: %w", err)
 	}
 
 	resolverSk, err := HexDecodeKey(rc.ResolverSk)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decoding secret key: %w", err)
 	}
 
 	if len(resolverPk) != KeySize || len(resolverSk) != KeySize {
@@ -87,7 +88,7 @@ func (rc *ResolverConfig) CreateCert() (cert *Cert, err error) {
 
 	privateKey, err := HexDecodeKey(rc.PrivateKey)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decoding private key: %w", err)
 	}
 
 	cert.Sign(privateKey)
@@ -104,7 +105,7 @@ func (rc *ResolverConfig) CreateStamp(addr string) (stamp dnsstamps.ServerStamp,
 
 	serverPk, err := HexDecodeKey(rc.PublicKey)
 	if err != nil {
-		return stamp, err
+		return stamp, fmt.Errorf("decoding key: %w", err)
 	}
 
 	stamp.ServerPk = serverPk
@@ -122,7 +123,7 @@ func GenerateResolverConfig(
 	privateKey ed25519.PrivateKey,
 ) (rc ResolverConfig, err error) {
 	rc = ResolverConfig{
-		EsVersion: XSalsa20Poly1305,
+		ESVersion: XSalsa20Poly1305,
 	}
 	if !strings.HasPrefix(providerName, DNSCryptV2Prefix) {
 		providerName = DNSCryptV2Prefix + providerName
@@ -133,7 +134,7 @@ func GenerateResolverConfig(
 	if privateKey == nil {
 		_, privateKey, err = ed25519.GenerateKey(rand.Reader)
 		if err != nil {
-			return rc, err
+			return rc, fmt.Errorf("generating key: %w", err)
 		}
 	}
 
@@ -159,8 +160,6 @@ func HexDecodeKey(str string) (decoded []byte, err error) {
 }
 
 // generateRandomKeyPair generates a random key-pair.
-//
-// TODO(f.setrakov): Improve error handling.
 func generateRandomKeyPair() (privateKey, publicKey [KeySize]byte) {
 	privateKey = [KeySize]byte{}
 	publicKey = [KeySize]byte{}

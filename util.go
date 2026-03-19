@@ -2,11 +2,13 @@ package dnscrypt
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 	"net"
 	"strings"
 
-	"github.com/AdguardTeam/dnscrypt/xsecretbox"
+	"github.com/AdguardTeam/dnscrypt/internal/xsecretbox"
+	"github.com/AdguardTeam/golibs/errors"
 	"github.com/miekg/dns"
 	"golang.org/x/crypto/nacl/box"
 )
@@ -99,12 +101,7 @@ func computeSharedKey(
 		return sharedKey, nil
 	}
 
-	return [KeySize]byte{}, ErrEsVersion
-}
-
-// isDigit returns true if the given byte is a digit.
-func isDigit(b byte) (ok bool) {
-	return b >= '0' && b <= '9'
+	return [KeySize]byte{}, ErrESVersion
 }
 
 // dddToByte converts a slice of three ASCII digits into a byte value.
@@ -175,34 +172,57 @@ func packTxtString(buf []byte) (packed string) {
 
 // unpackTxtString unpacks a TXT string by unescaping special characters.
 func unpackTxtString(s string) (msg []byte) {
-	bs := make([]byte, len(s))
+	bs := []byte(s)
 	msg = make([]byte, 0)
-	copy(bs, s)
 	for i := 0; i < len(bs); i++ {
-		if bs[i] == '\\' {
-			i++
-			if i == len(bs) {
-				break
-			}
-
-			if i+2 < len(bs) && isDigit(bs[i]) && isDigit(bs[i+1]) && isDigit(bs[i+2]) {
-				msg = append(msg, dddToByte(bs[i:]))
-				i += 2
-			} else if bs[i] == 't' {
-				msg = append(msg, '\t')
-			} else if bs[i] == 'r' {
-				msg = append(msg, '\r')
-			} else if bs[i] == 'n' {
-				msg = append(msg, '\n')
-			} else {
-				msg = append(msg, bs[i])
-			}
-		} else {
+		if bs[i] != '\\' {
 			msg = append(msg, bs[i])
+
+			continue
 		}
+
+		i++
+		if i == len(bs) {
+			break
+		}
+
+		if i+2 < len(bs) && isDigitSequence(bs[i:i+3]) {
+			msg = append(msg, dddToByte(bs[i:]))
+			i += 2
+
+			continue
+		}
+
+		msg = append(msg, unescape(bs[i]))
 	}
 
 	return msg
+}
+
+// unescape returns corresponding escape-sequence by its char.  If b is not part
+// of any escape sequence, b is being returned.
+func unescape(b byte) (escaped byte) {
+	switch b {
+	case 't':
+		return '\t'
+	case 'r':
+		return '\r'
+	case 'n':
+		return '\n'
+	default:
+		return b
+	}
+}
+
+// isDigitSequence returns true if every character in sequence is numeric.
+func isDigitSequence(sequence []byte) (ok bool) {
+	for _, c := range sequence {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+
+	return true
 }
 
 // normalize truncates the DNS response if needed depending on the protocol.
@@ -251,7 +271,7 @@ func readPrefixed(conn net.Conn) (b []byte, err error) {
 	l := make([]byte, 2)
 	_, err = conn.Read(l)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("reading msg len: %w", err)
 	}
 
 	packetLen := binary.BigEndian.Uint16(l)
@@ -262,7 +282,7 @@ func readPrefixed(conn net.Conn) (b []byte, err error) {
 	buf := make([]byte, packetLen)
 	_, err = io.ReadFull(conn, buf)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("reading full message: %w", err)
 	}
 
 	return buf, nil
@@ -275,7 +295,7 @@ func writePrefixed(b []byte, conn net.Conn) (err error) {
 	binary.BigEndian.PutUint16(l, uint16(len(b)))
 	_, err = (&net.Buffers{l, b}).WriteTo(conn)
 
-	return err
+	return errors.Annotate(err, "writing to connection: %w")
 }
 
 // isConnClosed checks if the error signals a closed server connection.

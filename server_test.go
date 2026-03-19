@@ -98,7 +98,7 @@ func testServerServeCert(tb testing.TB, proto dnscrypt.Proto) {
 	require.NotNil(tb, ri)
 
 	assert.Equal(tb, cert.ClientMagic, ri.ResolverCert.ClientMagic)
-	assert.Equal(tb, cert.EsVersion, ri.ResolverCert.EsVersion)
+	assert.Equal(tb, cert.ESVersion, ri.ResolverCert.ESVersion)
 	assert.Equal(tb, cert.NotBefore, ri.ResolverCert.NotBefore)
 	assert.Equal(tb, cert.NotAfter, ri.ResolverCert.NotAfter)
 	assert.Equal(tb, cert.ResolverPk, ri.ResolverCert.ResolverPk)

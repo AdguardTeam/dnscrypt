@@ -5,7 +5,7 @@ import (
 	"crypto/rand"
 	"testing"
 
-	"github.com/AdguardTeam/dnscrypt/xsecretbox"
+	"github.com/AdguardTeam/dnscrypt/internal/xsecretbox"
 	"github.com/stretchr/testify/require"
 )
 
@@ -37,7 +37,7 @@ func testDNSCryptResponseEncryptDecrypt(tb testing.TB, esVersion CryptoConstruct
 	require.NoError(tb, err)
 
 	r1 := &EncryptedResponse{
-		EsVersion: esVersion,
+		ESVersion: esVersion,
 	}
 
 	_, _ = rand.Read(r1.Nonce[:nonceSize/12])
@@ -49,7 +49,7 @@ func testDNSCryptResponseEncryptDecrypt(tb testing.TB, esVersion CryptoConstruct
 	require.NoError(tb, err)
 
 	r2 := &EncryptedResponse{
-		EsVersion: esVersion,
+		ESVersion: esVersion,
 	}
 
 	decrypted, err := r2.Decrypt(encrypted, clientSharedKey)

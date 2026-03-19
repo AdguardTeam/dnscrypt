@@ -36,7 +36,7 @@ func testDNSCryptQueryEncryptDecrypt(tb testing.TB, esVersion CryptoConstruction
 	_, _ = rand.Read(clientMagic[:])
 
 	q1 := EncryptedQuery{
-		EsVersion:   esVersion,
+		ESVersion:   esVersion,
 		ClientPk:    clientPublicKey,
 		ClientMagic: clientMagic,
 	}
@@ -48,7 +48,7 @@ func testDNSCryptQueryEncryptDecrypt(tb testing.TB, esVersion CryptoConstruction
 	require.NoError(tb, err)
 
 	q2 := EncryptedQuery{
-		EsVersion:   esVersion,
+		ESVersion:   esVersion,
 		ClientMagic: clientMagic,
 	}
 

@@ -56,7 +56,7 @@ func (w *TCPResponseWriter) WriteMsg(ctx context.Context, m *dns.Msg) (err error
 	if err != nil {
 		w.logger.DebugContext(ctx, "failed to encrypt the DNS query", slogutil.KeyError, err)
 
-		return err
+		return fmt.Errorf("encrypting query: %w", err)
 	}
 
 	return writePrefixed(res, w.tcpConn)
@@ -78,45 +78,63 @@ func (s *Server) ServeTCP(ctx context.Context, l net.Listener) (err error) {
 	certTxt := s.getCertTXT()
 
 	for s.isStarted() {
-		var conn net.Conn
-		conn, err = l.Accept()
-		if err != nil {
-			if !s.isStarted() {
-				break
-			}
-
-			var netErr net.Error
-			if errors.As(err, &netErr) && netErr.Timeout() {
-				continue
-			}
-
-			if isConnClosed(err) {
-				s.logger.InfoContext(ctx, "TCP listener closed, exiting loop")
-			} else {
-				s.logger.InfoContext(ctx, "got error when reading from UDP listen", slogutil.KeyError, err)
-			}
-
+		if s.serveTCPLoop(ctx, certTxt, l, tcpWg) {
 			break
 		}
-
-		// Track the connection to allow unblocking reads on shutdown.
-		s.lock.Lock()
-		s.tcpConns[conn] = struct{}{}
-		s.lock.Unlock()
-
-		tcpWg.Add(1)
-		go func() {
-			_ = s.handleTCPConnection(ctx, conn, certTxt)
-
-			_ = conn.Close()
-			s.lock.Lock()
-			delete(s.tcpConns, conn)
-			s.lock.Unlock()
-			tcpWg.Done()
-		}()
 	}
 
 	return nil
+}
+
+// serveTCPLoop accepts TCP connections and runs goroutines to handle them. It
+// also handles server shutdown.  It returns true if the server has stopped. l
+// and tcpWg must not be nil.
+func (s *Server) serveTCPLoop(
+	ctx context.Context,
+	certTxt string,
+	l net.Listener,
+	tcpWg *sync.WaitGroup,
+) (shutdown bool) {
+	conn, err := l.Accept()
+	if err != nil {
+		if !s.isStarted() {
+			return true
+		}
+
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			return false
+		}
+
+		if isConnClosed(err) {
+			s.logger.InfoContext(ctx, "TCP listener closed, exiting loop")
+		} else {
+			s.logger.InfoContext(
+				ctx,
+				"got error when reading from TCP listener",
+				slogutil.KeyError, err,
+			)
+		}
+
+		return true
+	}
+
+	// Track the connection to allow unblocking reads on shutdown.
+	s.lock.Lock()
+	s.tcpConns[conn] = struct{}{}
+	s.lock.Unlock()
+
+	tcpWg.Add(1)
+	go func() {
+		_ = s.handleTCPConnection(ctx, conn, certTxt)
+		_ = conn.Close()
+		s.lock.Lock()
+		delete(s.tcpConns, conn)
+		s.lock.Unlock()
+		tcpWg.Done()
+	}()
+
+	return false
 }
 
 // prepareServeTCP prepares the server and listener for DNSCrypt service.  l
@@ -210,14 +228,14 @@ func (s *Server) handleTCPConnection(
 		var b []byte
 		b, err = readPrefixed(conn)
 		if err != nil {
-			return err
+			return fmt.Errorf("reading dns message from connection: %w", err)
 		}
 
 		err = s.handleTCPMsg(ctx, b, conn, certTxt)
 		if err != nil {
 			s.logger.DebugContext(ctx, "failed to process a DNS query", slogutil.KeyError, err)
 
-			return err
+			return fmt.Errorf("handling tcp message: %w", err)
 		}
 
 		timeout = defaultTCPIdleTimeout

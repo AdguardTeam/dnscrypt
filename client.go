@@ -83,8 +83,7 @@ func NewClient(conf *ClientConfig) (c *Client) {
 func (c *Client) DialContext(ctx context.Context, stampStr string) (info *ResolverInfo, err error) {
 	stamp, err := dnsstamps.NewServerStampFromString(stampStr)
 	if err != nil {
-		// Invalid SDNS stamp.
-		return nil, err
+		return nil, fmt.Errorf("creating server stamp: %w", err)
 	}
 
 	if stamp.Proto != dnsstamps.StampProtoTypeDNSCrypt {
@@ -110,13 +109,13 @@ func (c *Client) DialStampContext(
 
 	cert, err := c.fetchCert(ctx, stamp)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("fetching cert: %w", err)
 	}
 
 	info.ResolverCert = cert
-	sharedKey, err := computeSharedKey(cert.EsVersion, &info.SecretKey, &cert.ResolverPk)
+	sharedKey, err := computeSharedKey(cert.ESVersion, &info.SecretKey, &cert.ResolverPk)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("computing shared key: %w", err)
 	}
 
 	info.SharedKey = sharedKey
@@ -165,22 +164,22 @@ func (c *Client) ExchangeConnContext(
 ) (resp *dns.Msg, err error) {
 	query, err := c.encrypt(m, info)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("encrypting: %w", err)
 	}
 
 	err = c.writeQuery(ctx, conn, query)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("writing query: %w", err)
 	}
 
 	b, err := c.readResponse(ctx, conn)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("reading response: %w", err)
 	}
 
 	resp, err = c.decrypt(b, info)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decrypting response: %w", err)
 	}
 
 	return resp, nil
@@ -188,8 +187,6 @@ func (c *Client) ExchangeConnContext(
 
 // writeQuery writes query to the network connection.  Depending on the
 // protocol we may write a 2-byte prefix or not.  conn must not be nil.
-//
-// TODO(f.setrakov): Improve error handling.
 func (c *Client) writeQuery(ctx context.Context, conn net.Conn, query []byte) (err error) {
 	deadline, ok := ctx.Deadline()
 	if ok {
@@ -200,17 +197,21 @@ func (c *Client) writeQuery(ctx context.Context, conn net.Conn, query []byte) (e
 		l := make([]byte, 2)
 		binary.BigEndian.PutUint16(l, uint16(len(query)))
 		_, err = (&net.Buffers{l, query}).WriteTo(conn)
+		if err != nil {
+			return fmt.Errorf("writing to tcp connection: %w", err)
+		}
 	} else {
 		_, err = conn.Write(query)
+		if err != nil {
+			return fmt.Errorf("writing to connection: %w", err)
+		}
 	}
 
-	return err
+	return nil
 }
 
 // readResponse reads response from the network connection depending on the
 // protocol, we may read a 2-byte prefix or not.  conn must not be nil.
-//
-// TODO(f.setrakov): Improve error handling.
 func (c *Client) readResponse(ctx context.Context, conn net.Conn) (resp []byte, err error) {
 	deadline, ok := ctx.Deadline()
 	if ok {
@@ -242,39 +243,43 @@ func (c *Client) readResponse(ctx context.Context, conn net.Conn) (resp []byte, 
 // and info must not be nil.
 func (c *Client) encrypt(m *dns.Msg, info *ResolverInfo) (msg []byte, err error) {
 	q := EncryptedQuery{
-		EsVersion:   info.ResolverCert.EsVersion,
+		ESVersion:   info.ResolverCert.ESVersion,
 		ClientMagic: info.ResolverCert.ClientMagic,
 		ClientPk:    info.PublicKey,
 	}
 	query, err := m.Pack()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("packing dns message: %w", err)
 	}
 
 	msg, err = q.Encrypt(query, info.SharedKey)
+	if err != nil {
+		return nil, fmt.Errorf("encrypting message: %w", err)
+	}
+
 	if len(msg) > c.maxQuerySize() {
 		return nil, ErrQueryTooLarge
 	}
 
-	return msg, err
+	return msg, nil
 }
 
 // decrypt decrypts a DNS message using a shared key from the resolver info.
 // info must not be nil.
 func (c *Client) decrypt(b []byte, info *ResolverInfo) (msg *dns.Msg, err error) {
 	dr := EncryptedResponse{
-		EsVersion: info.ResolverCert.EsVersion,
+		ESVersion: info.ResolverCert.ESVersion,
 	}
 
 	response, err := dr.Decrypt(b, info.SharedKey)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decrypting server response: %w", err)
 	}
 
 	msg = &dns.Msg{}
 	err = msg.Unpack(response)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("unpacking dns message: %w", err)
 	}
 
 	return msg, nil
@@ -295,47 +300,57 @@ func (c *Client) fetchCert(
 	client := dns.Client{Net: string(c.proto), UDPSize: uint16(defaultUDPSize)}
 	r, _, err := client.ExchangeContext(ctx, query, stamp.ServerAddrStr)
 	if err != nil {
-		// TODO(f.setrakov): Improve error wrapping.
-		return nil, err
+		return nil, fmt.Errorf("sending dns query: %w", err)
 	}
 
 	if r.Rcode != dns.RcodeSuccess {
 		return nil, ErrFailedToFetchCert
 	}
 
-	currentCert := &Cert{}
-	foundValid := false
+	cert = &Cert{}
 	for _, rr := range r.Answer {
-		txt, ok := rr.(*dns.TXT)
-		if !ok {
-			continue
+		currentCert := c.parseCertFromTXT(ctx, stamp.ServerPk, rr, cert, providerName)
+		if currentCert != nil {
+			cert = currentCert
+
+			break
 		}
-
-		certStr := strings.Join(txt.Txt, "")
-		cert, err = c.parseCert(ctx, stamp.ServerPk, currentCert, providerName, certStr)
-		if err != nil {
-			c.logger.DebugContext(ctx,
-				"bad cert",
-				"provider", providerName,
-				slogutil.KeyError, err,
-			)
-
-			continue
-		} else if cert == nil {
-			continue
-		}
-
-		currentCert = cert
-		foundValid = true
 	}
 
-	if foundValid {
-		return currentCert, nil
-	} else if err == nil {
-		err = fmt.Errorf("no valid txt records for provider %q", providerName)
+	if cert.Serial == 0 {
+		return nil, fmt.Errorf("no valid txt records for provider %q", providerName)
 	}
 
-	return nil, err
+	return cert, nil
+}
+
+// parseCertFromTXT attempts to parse and validate a DNSCrypt certificate from
+// a TXT DNS record.  It returns the certificate if it's valid and has higher
+// priority than currentCert, or nil otherwise.  rr and currentCert must not be
+// nil.
+func (c *Client) parseCertFromTXT(
+	ctx context.Context,
+	serverPk ed25519.PublicKey,
+	rr dns.RR,
+	currentCert *Cert,
+	providerName string,
+) (cert *Cert) {
+	txt, ok := rr.(*dns.TXT)
+	if !ok {
+		return nil
+	}
+
+	certStr := strings.Join(txt.Txt, "")
+	cert, err := c.parseCert(ctx, serverPk, currentCert, providerName, certStr)
+	if err != nil {
+		c.logger.DebugContext(ctx, "bad cert", "provider", providerName, slogutil.KeyError, err)
+
+		return nil
+	} else if cert == nil {
+		return nil
+	}
+
+	return cert
 }
 
 // parseCert parses a certificate from its string form and returns it if it
@@ -348,7 +363,6 @@ func (c *Client) parseCert(
 	certStr string,
 ) (cert *Cert, err error) {
 	certBytes := unpackTxtString(certStr)
-
 	cert = &Cert{}
 	err = cert.UnmarshalBinary(certBytes)
 	if err != nil {
@@ -362,12 +376,9 @@ func (c *Client) parseCert(
 		"cert_serial", cert.Serial,
 	)
 
-	if !cert.VerifyDate() {
-		return nil, ErrInvalidDate
-	}
-
-	if !cert.VerifySignature(serverPk) {
-		return nil, ErrInvalidCertSignature
+	err = verifyCert(cert, serverPk)
+	if err != nil {
+		return nil, fmt.Errorf("verifying cert: %w", err)
 	}
 
 	if cert.Serial < currentCert.Serial {
@@ -385,7 +396,7 @@ func (c *Client) parseCert(
 		return cert, nil
 	}
 
-	if cert.EsVersion <= currentCert.EsVersion {
+	if cert.ESVersion <= currentCert.ESVersion {
 		c.logger.DebugContext(
 			ctx,
 			"keeping the current cert es version",
@@ -399,11 +410,25 @@ func (c *Client) parseCert(
 		ctx,
 		"upgrading the construction",
 		"provider", providerName,
-		"es_version", currentCert.EsVersion,
-		"new_es_version", cert.EsVersion,
+		"es_version", currentCert.ESVersion,
+		"new_es_version", cert.ESVersion,
 	)
 
 	return cert, nil
+}
+
+// verifyCert verifies the date and signature of the certificate.  cert must not
+// be nil.
+func verifyCert(cert *Cert, serverPk ed25519.PublicKey) (err error) {
+	if !cert.VerifyDate() {
+		return ErrInvalidDate
+	}
+
+	if !cert.VerifySignature(serverPk) {
+		return ErrInvalidCertSignature
+	}
+
+	return nil
 }
 
 // maxQuerySize returns the maximum query size for the client.

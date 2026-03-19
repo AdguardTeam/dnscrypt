@@ -165,11 +165,9 @@ else
 	run_linter "$go" tool govulncheck work
 fi
 
-# TODO(f.setrakov): Set the threshold to the default value.
-run_linter "$go" tool gocyclo --over 11 .
+run_linter "$go" tool gocyclo --over 10 .
 
-# TODO(f.setrakov): Set the threshold to the default value.
-run_linter "$go" tool gocognit --over 18 .
+run_linter "$go" tool gocognit --over 10 .
 
 run_linter "$go" tool ineffassign work
 

@@ -115,8 +115,6 @@ func NewServer(conf *ServerConfig) (s *Server, err error) {
 // prepareShutdown prepares the server to shutdown: unblocks reads from all
 // connections related to this server, marks the server as stopped.  If the
 // server is not started, returns [ErrServerNotStarted].
-//
-// TODO(f.setrakov): Improve error handling.
 func (s *Server) prepareShutdown(ctx context.Context) (err error) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -164,7 +162,7 @@ func (s *Server) Shutdown(ctx context.Context) (err error) {
 
 	err = s.prepareShutdown(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("preparing shutdown: %w", err)
 	}
 
 	closed := make(chan struct{})
@@ -182,7 +180,7 @@ func (s *Server) Shutdown(ctx context.Context) (err error) {
 		err = ctx.Err()
 	}
 
-	return err
+	return errors.Annotate(err, "shutting down: %w")
 }
 
 // init initializes (lazily) Server properties on startup.  This method is
@@ -206,8 +204,6 @@ func (s *Server) isStarted() (ok bool) {
 }
 
 // serveDNS serves a DNS response.  rw and r must not be nil.
-//
-// TODO(f.setrakov): Improve error handling.
 func (s *Server) serveDNS(ctx context.Context, rw ResponseWriter, r *dns.Msg) (err error) {
 	if r == nil || len(r.Question) != 1 || r.Response {
 		return ErrInvalidQuery
@@ -215,12 +211,17 @@ func (s *Server) serveDNS(ctx context.Context, rw ResponseWriter, r *dns.Msg) (e
 
 	s.logger.DebugContext(ctx, "handling a DNS query", "question", r.Question[0].Name)
 	err = s.handler.ServeDNS(ctx, rw, r)
-	if err != nil {
-		s.logger.DebugContext(ctx, "error while handling a DNS query", slogutil.KeyError, err)
+	if err == nil {
+		return nil
+	}
 
-		reply := &dns.Msg{}
-		reply.SetRcode(r, dns.RcodeServerFailure)
-		_ = rw.WriteMsg(ctx, reply)
+	s.logger.DebugContext(ctx, "error while handling a DNS query", slogutil.KeyError, err)
+
+	reply := &dns.Msg{}
+	reply.SetRcode(r, dns.RcodeServerFailure)
+	err = rw.WriteMsg(ctx, reply)
+	if err != nil {
+		return fmt.Errorf("writing message: %w", err)
 	}
 
 	return nil
@@ -229,17 +230,17 @@ func (s *Server) serveDNS(ctx context.Context, rw ResponseWriter, r *dns.Msg) (e
 // encrypt encrypts DNSCrypt response.  m must not be nil.
 func (s *Server) encrypt(m *dns.Msg, q EncryptedQuery) (encrypted []byte, err error) {
 	r := EncryptedResponse{
-		EsVersion: q.EsVersion,
+		ESVersion: q.ESVersion,
 		Nonce:     q.Nonce,
 	}
 	packet, err := m.Pack()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("packing dns message: %w", err)
 	}
 
-	sharedKey, err := computeSharedKey(q.EsVersion, &s.resolverCert.ResolverSk, &q.ClientPk)
+	sharedKey, err := computeSharedKey(q.ESVersion, &s.resolverCert.ResolverSk, &q.ClientPk)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("computing shared key: %w", err)
 	}
 
 	return r.Encrypt(packet, sharedKey)
@@ -248,18 +249,18 @@ func (s *Server) encrypt(m *dns.Msg, q EncryptedQuery) (encrypted []byte, err er
 // decrypt decrypts the incoming message and returns a DNS message to process.
 func (s *Server) decrypt(b []byte) (msg *dns.Msg, query EncryptedQuery, err error) {
 	query = EncryptedQuery{
-		EsVersion:   s.resolverCert.EsVersion,
+		ESVersion:   s.resolverCert.ESVersion,
 		ClientMagic: s.resolverCert.ClientMagic,
 	}
 	decrypted, err := query.Decrypt(b, s.resolverCert.ResolverSk)
 	if err != nil {
-		return nil, query, err
+		return nil, query, fmt.Errorf("decrypting query: %w", err)
 	}
 
 	msg = &dns.Msg{}
 	err = msg.Unpack(decrypted)
 	if err != nil {
-		return nil, query, err
+		return nil, query, fmt.Errorf("unpacking dns message: %w", err)
 	}
 
 	return msg, query, nil
@@ -270,7 +271,7 @@ func (s *Server) handleHandshake(b []byte, certTxt string) (res []byte, err erro
 	m := &dns.Msg{}
 	err = m.Unpack(b)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("unpacking dns message: %w", err)
 	}
 
 	if len(m.Question) != 1 || m.Response {

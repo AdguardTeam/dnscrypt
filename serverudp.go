@@ -93,44 +93,63 @@ func (s *Server) ServeUDP(ctx context.Context, l *net.UDPConn) (err error) {
 	certTxt := s.getCertTXT()
 
 	for s.isStarted() {
-		var b []byte
-		var sess *dns.SessionUDP
-		b, sess, err = s.readUDPMsg(l)
+		var stopped bool
+		stopped, err = s.serveUDPLoop(ctx, l, udpWg, certTxt)
 		if err != nil {
-			if !s.isStarted() {
-				return nil
-			}
-
-			var netErr net.Error
-			if errors.As(err, &netErr) && netErr.Timeout() {
-				continue
-			}
-
-			if isConnClosed(err) {
-				s.logger.InfoContext(ctx, "UDP listener closed, exiting loop")
-			} else {
-				s.logger.InfoContext(
-					ctx,
-					"got error when reading from UDP",
-					slogutil.KeyError, err,
-				)
-			}
-
+			// Don't wrap the error as it is informative enough.
 			return err
 		}
 
-		if len(b) < minDNSPacketSize {
-			continue
+		if stopped {
+			break
 		}
-
-		udpWg.Add(1)
-		go func() {
-			s.serveUDPMsg(ctx, b, certTxt, sess, l)
-			udpWg.Done()
-		}()
 	}
 
 	return nil
+}
+
+// serveTCPLoop reads UDP messages and runs goroutines to handle them.  It also
+// handles server shutdown.  It returns true if the server has stopped.  l and
+// udpWg must not be nil.
+func (s *Server) serveUDPLoop(
+	ctx context.Context,
+	l *net.UDPConn,
+	udpWg *sync.WaitGroup,
+	certTxt string,
+) (stopped bool, err error) {
+	b, sess, err := s.readUDPMsg(l)
+	if err != nil {
+		if !s.isStarted() {
+			return true, nil
+		}
+
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			// Note that timeout errors will be here (i.e. hitting
+			// ReadDeadline).
+			return false, nil
+		}
+
+		if isConnClosed(err) {
+			s.logger.InfoContext(ctx, "UDP listener closed, exiting loop")
+		} else {
+			s.logger.InfoContext(ctx, "got error when reading from UDP", slogutil.KeyError, err)
+		}
+
+		return false, fmt.Errorf("reading udp message: %w", err)
+	}
+
+	if len(b) < minDNSPacketSize {
+		return false, nil
+	}
+
+	udpWg.Add(1)
+	go func() {
+		s.serveUDPMsg(ctx, b, certTxt, sess, l)
+		udpWg.Done()
+	}()
+
+	return false, nil
 }
 
 // prepareServeUDP prepares the server and listener for DNSCrypt service.  l
@@ -138,7 +157,7 @@ func (s *Server) ServeUDP(ctx context.Context, l *net.UDPConn) (err error) {
 func (s *Server) prepareServeUDP(l *net.UDPConn) (err error) {
 	err = setUDPSocketOptions(l)
 	if err != nil {
-		return err
+		return fmt.Errorf("configuring udp socket: %w", err)
 	}
 
 	s.lock.Lock()
@@ -179,12 +198,10 @@ func (s *Server) readUDPMsg(l *net.UDPConn) (msg []byte, sess *dns.SessionUDP, e
 		return nil, nil, fmt.Errorf("reading from udp session: %w", err)
 	}
 
-	return msg[:n], sess, err
+	return msg[:n], sess, nil
 }
 
 // serveUDPMsg handles incoming DNS message.  sess and l must not be nil.
-//
-// TODO(f.setrakov): Improve error handling.
 func (s *Server) serveUDPMsg(
 	ctx context.Context,
 	b []byte,

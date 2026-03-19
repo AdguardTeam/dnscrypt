@@ -26,7 +26,7 @@ func TestClient_DialContext(t *testing.T) {
 		name:       "invalid_stamp",
 		proto:      dnscrypt.ProtoUDP,
 		stampStr:   "invalid_stamp_str",
-		wantErrMsg: "stamps are expected to start with sdns://",
+		wantErrMsg: "creating server stamp: stamps are expected to start with sdns://",
 	}, {
 		name:       "invalid_stamp_proto",
 		stampStr:   stampBadProto.String(),

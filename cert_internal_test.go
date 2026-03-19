@@ -27,7 +27,7 @@ func TestCert_MarshalBinary(t *testing.T) {
 	require.Equal(t, cert.Serial, cert2.Serial)
 	require.Equal(t, cert.NotBefore, cert2.NotBefore)
 	require.Equal(t, cert.NotAfter, cert2.NotAfter)
-	require.Equal(t, cert.EsVersion, cert2.EsVersion)
+	require.Equal(t, cert.ESVersion, cert2.ESVersion)
 	require.True(t, bytes.Equal(cert.ClientMagic[:], cert2.ClientMagic[:]))
 	require.True(t, bytes.Equal(cert.ResolverPk[:], cert2.ResolverPk[:]))
 	require.True(t, bytes.Equal(cert.Signature[:], cert2.Signature[:]))
@@ -47,7 +47,7 @@ func TestCert_UnmarshalBinary(t *testing.T) {
 	err = cert.UnmarshalBinary(b)
 	require.NoError(t, err)
 	require.Equal(t, uint32(1574811744), cert.Serial)
-	require.Equal(t, XSalsa20Poly1305, cert.EsVersion)
+	require.Equal(t, XSalsa20Poly1305, cert.ESVersion)
 	require.Equal(t, uint32(1574811744), cert.NotBefore)
 	require.Equal(t, uint32(1606347744), cert.NotAfter)
 }
@@ -63,7 +63,7 @@ func generateValidCert(
 		Serial:    1,
 		NotAfter:  uint32(time.Now().Add(1 * time.Hour).Unix()),
 		NotBefore: uint32(time.Now().Add(-1 * time.Hour).Unix()),
-		EsVersion: XChacha20Poly1305,
+		ESVersion: XChacha20Poly1305,
 	}
 
 	resolverSk, resolverPk := generateRandomKeyPair()

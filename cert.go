@@ -22,9 +22,9 @@ type Cert struct {
 	// a higher serial number.
 	Serial uint32
 
-	// EsVersion is the cryptographic construction to use with this
+	// ESVersion is the cryptographic construction to use with this
 	// certificate.
-	EsVersion CryptoConstruction
+	ESVersion CryptoConstruction
 
 	// Signature is a 64-byte signature of (<resolver-pk> <client-magic>
 	// <serial> <ts-start> <ts-end> <extensions>) using the Ed25519 algorithm
@@ -71,7 +71,7 @@ var _ encoding.BinaryMarshaler = (*Cert)(nil)
 func (c *Cert) MarshalBinary() (serialized []byte, err error) {
 	serialized = make([]byte, certByteLength)
 	copy(serialized[:4], certMagic[:])
-	binary.BigEndian.PutUint16(serialized[4:6], uint16(c.EsVersion))
+	binary.BigEndian.PutUint16(serialized[4:6], uint16(c.ESVersion))
 	copy(serialized[6:8], []byte{0, 0})
 	copy(serialized[8:72], c.Signature[:ed25519.SignatureSize])
 	c.writeSigned(serialized[72:])
@@ -84,8 +84,8 @@ var _ validate.Interface = (*Cert)(nil)
 
 // Validate implements the [validate.Interface] for *Cert.
 func (c *Cert) Validate() (err error) {
-	if c.EsVersion == UndefinedConstruction {
-		return ErrEsVersion
+	if c.ESVersion == UndefinedConstruction {
+		return ErrESVersion
 	}
 
 	if !c.VerifyDate() {
@@ -114,11 +114,11 @@ func (c *Cert) UnmarshalBinary(b []byte) (err error) {
 
 	switch esVersion := binary.BigEndian.Uint16(b[4:6]); esVersion {
 	case uint16(XSalsa20Poly1305):
-		c.EsVersion = XSalsa20Poly1305
+		c.ESVersion = XSalsa20Poly1305
 	case uint16(XChacha20Poly1305):
-		c.EsVersion = XChacha20Poly1305
+		c.ESVersion = XChacha20Poly1305
 	default:
-		return ErrEsVersion
+		return ErrESVersion
 	}
 
 	copy(c.Signature[:], b[8:72])
@@ -165,9 +165,9 @@ func (c *Cert) Sign(privateKey ed25519.PrivateKey) {
 
 // String returns Cert's string representation.
 func (c *Cert) String() (s string) {
-	return fmt.Sprintf("Certificate Serial=%d NotBefore=%s NotAfter=%s EsVersion=%s",
+	return fmt.Sprintf("Certificate Serial=%d NotBefore=%s NotAfter=%s ESVersion=%s",
 		c.Serial, time.Unix(int64(c.NotBefore), 0).String(),
-		time.Unix(int64(c.NotAfter), 0).String(), c.EsVersion.String())
+		time.Unix(int64(c.NotAfter), 0).String(), c.ESVersion.String())
 }
 
 // writeSigned writes (<resolver-pk> <client-magic> <serial> <ts-start>

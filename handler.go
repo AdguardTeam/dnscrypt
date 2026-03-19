@@ -2,6 +2,7 @@ package dnscrypt
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"time"
 
@@ -40,13 +41,13 @@ type defaultHandler struct {
 func (h *defaultHandler) ServeDNS(ctx context.Context, rw ResponseWriter, r *dns.Msg) (err error) {
 	res, _, err := h.udpClient.ExchangeContext(ctx, r, h.addr)
 	if err != nil {
-		return err
+		return fmt.Errorf("exchanging udp message: %w", err)
 	}
 
 	if res.Truncated {
 		res, _, err = h.tcpClient.ExchangeContext(ctx, r, h.addr)
 		if err != nil {
-			return err
+			return fmt.Errorf("exchanging tcp message: %w", err)
 		}
 	}
 

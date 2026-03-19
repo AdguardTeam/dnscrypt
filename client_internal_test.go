@@ -29,7 +29,7 @@ func newTestCert(tb testing.TB, sk ed25519.PrivateKey, defaultCert, newCert *Cer
 
 	newCert = cmp.Or(newCert, defaultCert)
 	newCert.Serial = cmp.Or(newCert.Serial, defaultCert.Serial)
-	newCert.EsVersion = cmp.Or(newCert.EsVersion, defaultCert.EsVersion)
+	newCert.ESVersion = cmp.Or(newCert.ESVersion, defaultCert.ESVersion)
 	newCert.ResolverPk = cmp.Or(newCert.ResolverPk, defaultCert.ResolverPk)
 	newCert.ClientMagic = cmp.Or(newCert.ClientMagic, defaultCert.ClientMagic)
 	newCert.NotBefore = cmp.Or(newCert.NotBefore, defaultCert.NotBefore)
@@ -70,19 +70,19 @@ func TestClient_parseCert(t *testing.T) {
 			NotBefore: 1,
 			NotAfter:  2,
 		})),
-		wantErrMsg: ErrInvalidDate.Error(),
+		wantErrMsg: "verifying cert: " + string(ErrInvalidDate),
 	}, {
 		name:        "invalid_signature",
 		serverPk:    validPk,
 		currentCert: &Cert{},
 		certStr:     certToString(t, newTestCert(t, wrongSk, validCert, nil)),
-		wantErrMsg:  ErrInvalidCertSignature.Error(),
+		wantErrMsg:  "verifying cert: " + string(ErrInvalidCertSignature),
 	}, {
 		name:        "wrong_public_key",
 		serverPk:    wrongPk,
 		currentCert: &Cert{},
 		certStr:     certToString(t, newTestCert(t, validSk, validCert, nil)),
-		wantErrMsg:  ErrInvalidCertSignature.Error(),
+		wantErrMsg:  "verifying cert: " + string(ErrInvalidCertSignature),
 	}, {
 		name:        "valid_cert",
 		serverPk:    validPk,
@@ -111,7 +111,7 @@ func TestClient_parseCert(t *testing.T) {
 		serverPk:    validPk,
 		currentCert: validCert,
 		certStr: certToString(t, newTestCert(t, validSk, validCert, &Cert{
-			EsVersion: XSalsa20Poly1305,
+			ESVersion: XSalsa20Poly1305,
 		})),
 	}, {
 		name:        "same_serial_same_es",
