@@ -35,13 +35,13 @@ type ResolverInfo struct {
 
 	// SharedKey is the shared key that is to be used to encrypt/decrypt
 	// messages.
-	SharedKey [keySize]byte
+	SharedKey [KeySize]byte
 
 	// SecretKey is the client short-term secret key.
-	SecretKey [keySize]byte
+	SecretKey [KeySize]byte
 
 	// PublicKey is the client short-term public key.
-	PublicKey [keySize]byte
+	PublicKey [KeySize]byte
 }
 
 // ClientConfig is the configuration structure for [Client].
@@ -311,7 +311,8 @@ func (c *Client) fetchCert(
 			continue
 		}
 
-		cert, err = c.parseCert(ctx, stamp, currentCert, providerName, strings.Join(txt.Txt, ""))
+		certStr := strings.Join(txt.Txt, "")
+		cert, err = c.parseCert(ctx, stamp.ServerPk, currentCert, providerName, certStr)
 		if err != nil {
 			c.logger.DebugContext(ctx,
 				"bad cert",
@@ -341,7 +342,7 @@ func (c *Client) fetchCert(
 // has priority over currentCert.  currentCert must not be nil.
 func (c *Client) parseCert(
 	ctx context.Context,
-	stamp dnsstamps.ServerStamp,
+	serverPk ed25519.PublicKey,
 	currentCert *Cert,
 	providerName string,
 	certStr string,
@@ -349,7 +350,7 @@ func (c *Client) parseCert(
 	certBytes := unpackTxtString(certStr)
 
 	cert = &Cert{}
-	err = cert.Deserialize(certBytes)
+	err = cert.UnmarshalBinary(certBytes)
 	if err != nil {
 		return nil, fmt.Errorf("deserializing cert for: %w", err)
 	}
@@ -365,7 +366,7 @@ func (c *Client) parseCert(
 		return nil, ErrInvalidDate
 	}
 
-	if !cert.VerifySignature(stamp.ServerPk) {
+	if !cert.VerifySignature(serverPk) {
 		return nil, ErrInvalidCertSignature
 	}
 
@@ -373,10 +374,8 @@ func (c *Client) parseCert(
 		c.logger.DebugContext(
 			ctx,
 			"cert superseded by a previous certificate",
-			"provider",
-			providerName,
-			"cert_serial",
-			cert.Serial,
+			"provider", providerName,
+			"cert_serial", cert.Serial,
 		)
 
 		return nil, nil

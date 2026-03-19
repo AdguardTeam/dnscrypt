@@ -3,10 +3,16 @@ package dnscrypt
 import (
 	"bytes"
 	"crypto/ed25519"
+	"encoding"
 	"encoding/binary"
 	"fmt"
 	"time"
+
+	"github.com/AdguardTeam/golibs/validate"
 )
+
+// certByteLength is the standard length of a certificate's byte representation.
+const certByteLength = 124
 
 // Cert is a DNSCrypt server certificate.  See [ResolverConfig] for more info
 // on how to create one.
@@ -28,13 +34,13 @@ type Cert struct {
 
 	// ResolverPk is the resolver's short-term public key, which is 32 bytes
 	// when using X25519.  This key is used to encrypt/decrypt DNS queries.
-	ResolverPk [keySize]byte
+	ResolverPk [KeySize]byte
 
 	// ResolverSk is the resolver's short-term private key, which is 32 bytes
 	// when using X25519.  Note that it's only used in the server implementation
 	// and never serialized/deserialized.  This key is used to encrypt/decrypt
 	// DNS queries.
-	ResolverSk [keySize]byte
+	ResolverSk [KeySize]byte
 
 	// ClientMagic is the first 8 bytes of a client query that is to be built
 	// using the information from this certificate.  It may be a truncated
@@ -50,45 +56,55 @@ type Cert struct {
 	NotAfter uint32
 }
 
-// Serialize serializes the cert to bytes.
+// type check
+var _ encoding.BinaryMarshaler = (*Cert)(nil)
+
+// MarshalBinary implements the [encoding.BinaryMarshaler] interface for *Cert.
+// The certificate is serialised into a byte slice using the following schema:
 // <cert> ::= <cert-magic> <es-version> <protocol-minor-version> <signature>
 // <resolver-pk> <client-magic> <serial> <ts-start> <ts-end>
 // <extensions>
 // Certificates made of these information, without extensions, are 116 bytes
 // long.  With the addition of the cert-magic, es-version and
-// protocol-minor-version, the record is 124 bytes long.
-func (c *Cert) Serialize() (serialized []byte, err error) {
-	if c.EsVersion == UndefinedConstruction {
-		return nil, ErrEsVersion
-	}
-
-	if !c.VerifyDate() {
-		return nil, ErrInvalidDate
-	}
-
-	// Start serializing.
-	serialized = make([]byte, 124)
-
-	// <cert-magic>.
+// protocol-minor-version, the record is [certByteLength] bytes long.  err is
+// always nil.
+func (c *Cert) MarshalBinary() (serialized []byte, err error) {
+	serialized = make([]byte, certByteLength)
 	copy(serialized[:4], certMagic[:])
-	// <es-version>.
 	binary.BigEndian.PutUint16(serialized[4:6], uint16(c.EsVersion))
-	// <protocol-minor-version> is always 0x00 0x00.
 	copy(serialized[6:8], []byte{0, 0})
-	// <signature>.
 	copy(serialized[8:72], c.Signature[:ed25519.SignatureSize])
-	// signed: (<resolver-pk> <client-magic> <serial> <ts-start> <ts-end> <extensions>).
 	c.writeSigned(serialized[72:])
 
 	return serialized, nil
 }
 
-// Deserialize deserializes certificate from a byte array.
+// type check
+var _ validate.Interface = (*Cert)(nil)
+
+// Validate implements the [validate.Interface] for *Cert.
+func (c *Cert) Validate() (err error) {
+	if c.EsVersion == UndefinedConstruction {
+		return ErrEsVersion
+	}
+
+	if !c.VerifyDate() {
+		return ErrInvalidDate
+	}
+
+	return nil
+}
+
+// type check
+var _ encoding.BinaryUnmarshaler = (*Cert)(nil)
+
+// UnmarshalBinary implements the [encoding.BinaryUnmarshaler] interface for
+// *Cert.  Certificate is being deserialized using the following schema:
 // <cert> ::= <cert-magic> <es-version> <protocol-minor-version> <signature>
 // <resolver-pk> <client-magic> <serial> <ts-start> <ts-end>
 // <extensions>
-func (c *Cert) Deserialize(b []byte) (err error) {
-	if len(b) < 124 {
+func (c *Cert) UnmarshalBinary(b []byte) (err error) {
+	if len(b) < certByteLength {
 		return ErrCertTooShort
 	}
 
@@ -111,7 +127,7 @@ func (c *Cert) Deserialize(b []byte) (err error) {
 
 	c.Serial = binary.BigEndian.Uint32(b[112:116])
 	c.NotBefore = binary.BigEndian.Uint32(b[116:120])
-	c.NotAfter = binary.BigEndian.Uint32(b[120:124])
+	c.NotAfter = binary.BigEndian.Uint32(b[120:certByteLength])
 
 	return nil
 }
@@ -157,7 +173,7 @@ func (c *Cert) String() (s string) {
 // writeSigned writes (<resolver-pk> <client-magic> <serial> <ts-start>
 // <ts-end> <extensions>).
 func (c *Cert) writeSigned(dst []byte) {
-	copy(dst[:32], c.ResolverPk[:keySize])
+	copy(dst[:32], c.ResolverPk[:KeySize])
 	copy(dst[32:40], c.ClientMagic[:clientMagicSize])
 	binary.BigEndian.PutUint32(dst[40:44], c.Serial)
 	binary.BigEndian.PutUint32(dst[44:48], c.NotBefore)

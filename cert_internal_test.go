@@ -11,17 +11,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCertSerialize(t *testing.T) {
+func TestCert_MarshalBinary(t *testing.T) {
+	t.Parallel()
+
 	cert, publicKey, _ := generateValidCert(t)
 	require.False(t, bytes.Equal(cert.Signature[:], make([]byte, 64)))
 	require.True(t, cert.VerifySignature(publicKey))
 
-	b, err := cert.Serialize()
-	require.NoError(t, err)
-	require.Equal(t, 124, len(b))
+	b, _ := cert.MarshalBinary()
+	require.Equal(t, certByteLength, len(b))
 
 	cert2 := Cert{}
-	err = cert2.Deserialize(b)
+	err := cert2.UnmarshalBinary(b)
 	require.NoError(t, err)
 	require.Equal(t, cert.Serial, cert2.Serial)
 	require.Equal(t, cert.NotBefore, cert2.NotBefore)
@@ -32,7 +33,9 @@ func TestCertSerialize(t *testing.T) {
 	require.True(t, bytes.Equal(cert.Signature[:], cert2.Signature[:]))
 }
 
-func TestCertDeserialize(t *testing.T) {
+func TestCert_UnmarshalBinary(t *testing.T) {
+	t.Parallel()
+
 	// dig -t txt 2.dnscrypt-cert.opendns.com. -p 443 @208.67.220.220.
 	certBytes, err := os.ReadFile("testdata/dnscrypt-cert.opendns.txt")
 	require.NoError(t, err)
@@ -41,7 +44,7 @@ func TestCertDeserialize(t *testing.T) {
 	require.NoError(t, err)
 
 	cert := &Cert{}
-	err = cert.Deserialize(b)
+	err = cert.UnmarshalBinary(b)
 	require.NoError(t, err)
 	require.Equal(t, uint32(1574811744), cert.Serial)
 	require.Equal(t, XSalsa20Poly1305, cert.EsVersion)

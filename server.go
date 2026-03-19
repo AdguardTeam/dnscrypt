@@ -3,6 +3,7 @@ package dnscrypt
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"log/slog"
 	"net"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/AdguardTeam/golibs/errors"
 	"github.com/AdguardTeam/golibs/logutil/slogutil"
 	"github.com/AdguardTeam/golibs/service"
+	"github.com/AdguardTeam/golibs/validate"
 	"github.com/miekg/dns"
 )
 
@@ -54,6 +56,18 @@ type ServerConfig struct {
 	UDPSize uint
 }
 
+// type check
+var _ validate.Interface = (*ServerConfig)(nil)
+
+// Validate implements the [validate.Interface] for *ServerConfig.
+func (c *ServerConfig) Validate() (err error) {
+	errs := []error{}
+	errs = validate.Append(errs, "ResolverCert", c.ResolverCert)
+	errs = append(errs, validate.NotEmpty("ProviderName", c.ProviderName))
+
+	return errors.Join(errs...)
+}
+
 // Server is a DNSCrypt server implementation.
 //
 // TODO(f.setrakov): Consider implementing [service.Interface].
@@ -83,14 +97,19 @@ type Server struct {
 
 // NewServer returns properly initialized *Server.  conf must be non-nil and
 // valid.
-func NewServer(conf *ServerConfig) (s *Server) {
+func NewServer(conf *ServerConfig) (s *Server, err error) {
+	err = conf.Validate()
+	if err != nil {
+		return nil, fmt.Errorf("validating config: %w", err)
+	}
+
 	return &Server{
 		handler:      cmp.Or(conf.Handler, DefaultHandler),
 		resolverCert: conf.ResolverCert,
 		providerName: conf.ProviderName,
 		logger:       cmp.Or(conf.Logger, slog.Default()),
 		udpSize:      cmp.Or(conf.UDPSize, defaultUDPSize),
-	}
+	}, nil
 }
 
 // prepareShutdown prepares the server to shutdown: unblocks reads from all
@@ -137,7 +156,7 @@ func (s *Server) prepareShutdown(ctx context.Context) (err error) {
 // type check
 var _ service.Shutdowner = (*Server)(nil)
 
-// Shutdown tries to gracefully shutdown the server.  It waits until all
+// Shutdown implements the [service.Shutdowner] for *Server.  It waits until all
 // connections are processed and only after that it leaves the method.  If
 // context deadline is specified, it will exit earlier.
 func (s *Server) Shutdown(ctx context.Context) (err error) {
@@ -288,31 +307,10 @@ func (s *Server) handleHandshake(b []byte, certTxt string) (res []byte, err erro
 	return reply.Pack()
 }
 
-// validate checks if the Server config is properly set.
-func (s *Server) validate() (err error) {
-	if s.resolverCert == nil {
-		return errors.Annotate(ErrServerConfig, "ResolverCert is required")
-	}
-
-	if !s.resolverCert.VerifyDate() {
-		return errors.Annotate(ErrServerConfig, "ResolverCert date is not valid")
-	}
-
-	if s.providerName == "" {
-		return errors.Annotate(ErrServerConfig, "ProviderName must be set")
-	}
-
-	return nil
-}
-
 // getCertTXT serializes the cert TXT record that are to be sent to the client.
-func (s *Server) getCertTXT() (cert string, err error) {
-	certBuf, err := s.resolverCert.Serialize()
-	if err != nil {
-		return "", err
-	}
+func (s *Server) getCertTXT() (cert string) {
+	// Ignore the error as it is always nil.
+	certBuf, _ := s.resolverCert.MarshalBinary()
 
-	cert = packTxtString(certBuf)
-
-	return cert, nil
+	return packTxtString(certBuf)
 }

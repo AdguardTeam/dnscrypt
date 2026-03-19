@@ -24,7 +24,7 @@ type EncryptedQuery struct {
 	ClientMagic [clientMagicSize]byte
 
 	// ClientPk is the client's public key.
-	ClientPk [keySize]byte
+	ClientPk [KeySize]byte
 
 	// With a 24 bytes nonce, a question sent by a DNSCrypt client must be
 	// encrypted using the shared secret, and a nonce constructed as follows: 12
@@ -42,7 +42,7 @@ type EncryptedQuery struct {
 // TODO(f.setrakov): Improve error handling.
 func (q *EncryptedQuery) Encrypt(
 	packet []byte,
-	sharedKey [sharedKeySize]byte,
+	sharedKey [SharedKeySize]byte,
 ) (query []byte, err error) {
 	binary.BigEndian.PutUint64(q.Nonce[:8], uint64(time.Now().UnixNano()))
 	_, _ = rand.Read(q.Nonce[8:12])
@@ -72,9 +72,9 @@ func (q *EncryptedQuery) Encrypt(
 // q.ClientMagic and q.EsVersion must be set.
 func (q *EncryptedQuery) Decrypt(
 	query []byte,
-	serverSecretKey [keySize]byte,
+	serverSecretKey [KeySize]byte,
 ) (packet []byte, err error) {
-	headerLength := clientMagicSize + keySize + nonceSize/2
+	headerLength := clientMagicSize + KeySize + nonceSize/2
 	if len(query) < headerLength+xsecretbox.TagSize+minDNSPacketSize {
 		return nil, ErrInvalidQuery
 	}
@@ -86,14 +86,14 @@ func (q *EncryptedQuery) Decrypt(
 	}
 
 	idx := clientMagicSize
-	copy(q.ClientPk[:keySize], query[idx:idx+keySize])
+	copy(q.ClientPk[:KeySize], query[idx:idx+KeySize])
 
 	sharedKey, err := computeSharedKey(q.EsVersion, &serverSecretKey, &q.ClientPk)
 	if err != nil {
 		return nil, err
 	}
 
-	idx = idx + keySize
+	idx = idx + KeySize
 	copy(q.Nonce[:nonceSize/2], query[idx:idx+nonceSize/2])
 
 	idx = idx + nonceSize/2

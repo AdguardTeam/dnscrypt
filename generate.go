@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	// dnsCryptV2Prefix is the prefix for DNSCrypt v2 provider names.
-	dnsCryptV2Prefix = "2.dnscrypt-cert."
+	// DNSCryptV2Prefix is the prefix for DNSCrypt v2 provider names.
+	DNSCryptV2Prefix = "2.dnscrypt-cert."
 
 	// defaultCertValidity is the standard validity period for a generated
 	// certificate.
@@ -76,7 +76,7 @@ func (rc *ResolverConfig) CreateCert() (cert *Cert, err error) {
 		return nil, err
 	}
 
-	if len(resolverPk) != keySize || len(resolverSk) != keySize {
+	if len(resolverPk) != KeySize || len(resolverSk) != KeySize {
 		sk, pk := generateRandomKeyPair()
 		resolverSk = sk[:]
 		resolverPk = pk[:]
@@ -114,7 +114,7 @@ func (rc *ResolverConfig) CreateStamp(addr string) (stamp dnsstamps.ServerStamp,
 }
 
 // GenerateResolverConfig generates resolver configuration for a given provider
-// name.  providerName is mandatory.  If needed, "2.dnscrypt-cert." prefix is
+// name.  providerName is mandatory.  If needed, [DNSCryptV2Prefix] prefix is
 // added to it.  privateKey is optional.  If not set, it will be generated
 // automatically.
 func GenerateResolverConfig(
@@ -124,8 +124,8 @@ func GenerateResolverConfig(
 	rc = ResolverConfig{
 		EsVersion: XSalsa20Poly1305,
 	}
-	if !strings.HasPrefix(providerName, dnsCryptV2Prefix) {
-		providerName = dnsCryptV2Prefix + providerName
+	if !strings.HasPrefix(providerName, DNSCryptV2Prefix) {
+		providerName = DNSCryptV2Prefix + providerName
 	}
 
 	rc.ProviderName = providerName
@@ -161,9 +161,9 @@ func HexDecodeKey(str string) (decoded []byte, err error) {
 // generateRandomKeyPair generates a random key-pair.
 //
 // TODO(f.setrakov): Improve error handling.
-func generateRandomKeyPair() (privateKey, publicKey [keySize]byte) {
-	privateKey = [keySize]byte{}
-	publicKey = [keySize]byte{}
+func generateRandomKeyPair() (privateKey, publicKey [KeySize]byte) {
+	privateKey = [KeySize]byte{}
+	publicKey = [KeySize]byte{}
 
 	_, _ = rand.Read(privateKey[:])
 	curve25519.ScalarBaseMult(&publicKey, &privateKey)

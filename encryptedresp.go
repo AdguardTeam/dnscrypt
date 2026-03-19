@@ -29,7 +29,7 @@ type EncryptedResponse struct {
 // TODO(f.setrakov): Improve error handling.
 func (r *EncryptedResponse) Encrypt(
 	packet []byte,
-	sharedKey [sharedKeySize]byte,
+	sharedKey [SharedKeySize]byte,
 ) (response []byte, err error) {
 	_, _ = rand.Read(r.Nonce[12:16])
 	binary.BigEndian.PutUint64(r.Nonce[16:nonceSize], uint64(time.Now().UnixNano()))
@@ -57,7 +57,7 @@ func (r *EncryptedResponse) Encrypt(
 // Decrypt decrypts the server response.  r.EsVersion must be set.
 func (r *EncryptedResponse) Decrypt(
 	response []byte,
-	sharedKey [sharedKeySize]byte,
+	sharedKey [SharedKeySize]byte,
 ) (packet []byte, err error) {
 	headerLength := len(resolverMagic) + nonceSize
 	if len(response) < headerLength+xsecretbox.TagSize+minDNSPacketSize {

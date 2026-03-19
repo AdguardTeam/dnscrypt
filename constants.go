@@ -68,14 +68,13 @@ const (
 	// minDNSPacketSize is the minimum possible DNS packet size.
 	minDNSPacketSize = 12 + 5
 
-	// keySize is the size of public and secret keys in bytes.  See 11.
-	// Authenticated encryption and key exchange algorithm.  The public and
-	// secret keys are 32 bytes long in storage.
-	keySize = 32
+	// KeySize is the size of public and secret keys in bytes.  See
+	// https://dnscrypt.info/protocol for more information.
+	KeySize = 32
 
 	// sharedKeySize is the size of the shared key used to encrypt/decrypt
 	// messages.
-	sharedKeySize = 32
+	SharedKeySize = 32
 
 	// clientMagicSize is the size of ClientMagic in bytes.  ClientMagic is
 	// the first 8 bytes of a client query that is to be built using the

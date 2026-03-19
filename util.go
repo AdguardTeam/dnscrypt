@@ -81,9 +81,9 @@ func unpad(packet []byte) (unpadded []byte, err error) {
 // be nil.
 func computeSharedKey(
 	cryptoConstruction CryptoConstruction,
-	secretKey *[keySize]byte,
-	publicKey *[keySize]byte,
-) (sharedKey [keySize]byte, err error) {
+	secretKey *[KeySize]byte,
+	publicKey *[KeySize]byte,
+) (sharedKey [KeySize]byte, err error) {
 	switch cryptoConstruction {
 	case XChacha20Poly1305:
 		sharedKey, err = xsecretbox.SharedKey(*secretKey, *publicKey)
@@ -93,13 +93,13 @@ func computeSharedKey(
 
 		return sharedKey, nil
 	case XSalsa20Poly1305:
-		sharedKey = [sharedKeySize]byte{}
+		sharedKey = [SharedKeySize]byte{}
 		box.Precompute(&sharedKey, publicKey, secretKey)
 
 		return sharedKey, nil
 	}
 
-	return [keySize]byte{}, ErrEsVersion
+	return [KeySize]byte{}, ErrEsVersion
 }
 
 // isDigit returns true if the given byte is a digit.

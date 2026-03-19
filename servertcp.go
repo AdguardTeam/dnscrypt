@@ -66,10 +66,7 @@ func (w *TCPResponseWriter) WriteMsg(ctx context.Context, m *dns.Msg) (err error
 // goroutine and to stop it you need to close the listener or call
 // [Server.Shutdown].  l must not be nil.
 func (s *Server) ServeTCP(ctx context.Context, l net.Listener) (err error) {
-	err = s.prepareServeTCP(l)
-	if err != nil {
-		return err
-	}
+	s.prepareServeTCP(l)
 
 	s.logger.InfoContext(ctx, "entering DNSCrypt TCP listening loop", "listenAddr", l.Addr())
 
@@ -78,10 +75,7 @@ func (s *Server) ServeTCP(ctx context.Context, l net.Listener) (err error) {
 
 	s.wg.Add(1)
 
-	certTxt, err := s.getCertTXT()
-	if err != nil {
-		return err
-	}
+	certTxt := s.getCertTXT()
 
 	for s.isStarted() {
 		var conn net.Conn
@@ -127,12 +121,7 @@ func (s *Server) ServeTCP(ctx context.Context, l net.Listener) (err error) {
 
 // prepareServeTCP prepares the server and listener for DNSCrypt service.  l
 // must not be nil.
-func (s *Server) prepareServeTCP(l net.Listener) (err error) {
-	err = s.validate()
-	if err != nil {
-		return err
-	}
-
+func (s *Server) prepareServeTCP(l net.Listener) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	s.initOnce.Do(s.init)
@@ -141,8 +130,6 @@ func (s *Server) prepareServeTCP(l net.Listener) (err error) {
 	// Serve* methods can be called multiple times.
 	s.started = true
 	s.tcpListeners[l] = struct{}{}
-
-	return nil
 }
 
 // cleanUpTCP waits until all TCP messages before cleaning up.  tcpWg and l must

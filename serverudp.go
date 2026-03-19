@@ -90,10 +90,7 @@ func (s *Server) ServeUDP(ctx context.Context, l *net.UDPConn) (err error) {
 
 	s.logger.InfoContext(ctx, "entering DNSCrypt UDP listening loop", "listen_addr", l.LocalAddr())
 
-	certTxt, err := s.getCertTXT()
-	if err != nil {
-		return err
-	}
+	certTxt := s.getCertTXT()
 
 	for s.isStarted() {
 		var b []byte
@@ -139,11 +136,6 @@ func (s *Server) ServeUDP(ctx context.Context, l *net.UDPConn) (err error) {
 // prepareServeUDP prepares the server and listener for DNSCrypt service.  l
 // must not be nil.
 func (s *Server) prepareServeUDP(l *net.UDPConn) (err error) {
-	err = s.validate()
-	if err != nil {
-		return err
-	}
-
 	err = setUDPSocketOptions(l)
 	if err != nil {
 		return err
@@ -159,7 +151,7 @@ func (s *Server) prepareServeUDP(l *net.UDPConn) (err error) {
 
 	s.udpListeners[l] = struct{}{}
 
-	return err
+	return nil
 }
 
 // cleanUpUDP waits until all UDP messages before cleaning up.  udpWg and l must
