@@ -8,7 +8,7 @@ const (
 
 	// ErrQueryTooLarge is returned when the DNS query is larger than max
 	// allowed size.
-	ErrQueryTooLarge errors.Error = "DNSCrypt query is too large"
+	ErrQueryTooLarge errors.Error = "dnscrypt query is too large"
 
 	// ErrESVersion is returned when the cert contains unsupported es-version.
 	ErrESVersion errors.Error = "unsupported es-version"
@@ -21,17 +21,17 @@ const (
 	ErrInvalidCertSignature errors.Error = "cert has invalid signature"
 
 	// ErrInvalidQuery is returned when it failed to decrypt a DNSCrypt query.
-	ErrInvalidQuery errors.Error = "DNSCrypt query is invalid and cannot be decrypted"
+	ErrInvalidQuery errors.Error = "dnscrypt query is invalid and cannot be decrypted"
 
 	// ErrInvalidClientMagic is returned when client-magic does not match.
-	ErrInvalidClientMagic errors.Error = "DNSCrypt query contains invalid client magic"
+	ErrInvalidClientMagic errors.Error = "dnscrypt query contains invalid client magic"
 
 	// ErrInvalidResolverMagic is returned when server-magic does not match.
-	ErrInvalidResolverMagic errors.Error = "DNSCrypt response contains invalid resolver magic"
+	ErrInvalidResolverMagic errors.Error = "dnscrypt response contains invalid resolver magic"
 
 	// ErrInvalidResponse is returned when it failed to decrypt a DNSCrypt
 	// response.
-	ErrInvalidResponse errors.Error = "DNSCrypt response is invalid and cannot be decrypted"
+	ErrInvalidResponse errors.Error = "dnscrypt response is invalid and cannot be decrypted"
 
 	// ErrInvalidPadding is returned when it failed to unpad a query.
 	ErrInvalidPadding errors.Error = "invalid padding"
@@ -41,7 +41,7 @@ const (
 
 	// ErrFailedToFetchCert is returned when it failed to fetch DNSCrypt
 	// certificate.
-	ErrFailedToFetchCert errors.Error = "failed to fetch DNSCrypt certificate"
+	ErrFailedToFetchCert errors.Error = "failed to fetch dnscrypt certificate"
 
 	// ErrCertTooShort is returned when it failed to deserialize cert, too
 	// short.

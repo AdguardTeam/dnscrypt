@@ -14,9 +14,9 @@ import (
 // certByteLength is the standard length of a certificate's byte representation.
 const certByteLength = 124
 
-// Cert is a DNSCrypt server certificate.  See [ResolverConfig] for more info
-// on how to create one.
-type Cert struct {
+// Certificate is a DNSCrypt server certificate.  See [ResolverConfig] for more
+// info on how to create one.
+type Certificate struct {
 	// Serial is a 4 byte serial number in big-endian format.  If more than
 	// one certificates are valid, the client must prefer the certificate with
 	// a higher serial number.
@@ -57,18 +57,19 @@ type Cert struct {
 }
 
 // type check
-var _ encoding.BinaryMarshaler = (*Cert)(nil)
+var _ encoding.BinaryMarshaler = (*Certificate)(nil)
 
-// MarshalBinary implements the [encoding.BinaryMarshaler] interface for *Cert.
-// The certificate is serialised into a byte slice using the following schema:
+// MarshalBinary implements the [encoding.BinaryMarshaler] interface for
+// *Certificate.  The certificate is serialised into a byte slice using the
+// following schema:
 // <cert> ::= <cert-magic> <es-version> <protocol-minor-version> <signature>
 // <resolver-pk> <client-magic> <serial> <ts-start> <ts-end>
-// <extensions>
+//
 // Certificates made of these information, without extensions, are 116 bytes
 // long.  With the addition of the cert-magic, es-version and
 // protocol-minor-version, the record is [certByteLength] bytes long.  err is
 // always nil.
-func (c *Cert) MarshalBinary() (serialized []byte, err error) {
+func (c *Certificate) MarshalBinary() (serialized []byte, err error) {
 	serialized = make([]byte, certByteLength)
 	copy(serialized[:4], certMagic[:])
 	binary.BigEndian.PutUint16(serialized[4:6], uint16(c.ESVersion))
@@ -80,10 +81,10 @@ func (c *Cert) MarshalBinary() (serialized []byte, err error) {
 }
 
 // type check
-var _ validate.Interface = (*Cert)(nil)
+var _ validate.Interface = (*Certificate)(nil)
 
-// Validate implements the [validate.Interface] for *Cert.
-func (c *Cert) Validate() (err error) {
+// Validate implements the [validate.Interface] for *Certificate.
+func (c *Certificate) Validate() (err error) {
 	if c.ESVersion == UndefinedConstruction {
 		return ErrESVersion
 	}
@@ -96,14 +97,13 @@ func (c *Cert) Validate() (err error) {
 }
 
 // type check
-var _ encoding.BinaryUnmarshaler = (*Cert)(nil)
+var _ encoding.BinaryUnmarshaler = (*Certificate)(nil)
 
 // UnmarshalBinary implements the [encoding.BinaryUnmarshaler] interface for
-// *Cert.  Certificate is being deserialized using the following schema:
+// *Certificate.  Certificate is being deserialized using the following schema:
 // <cert> ::= <cert-magic> <es-version> <protocol-minor-version> <signature>
 // <resolver-pk> <client-magic> <serial> <ts-start> <ts-end>
-// <extensions>
-func (c *Cert) UnmarshalBinary(b []byte) (err error) {
+func (c *Certificate) UnmarshalBinary(b []byte) (err error) {
 	if len(b) < certByteLength {
 		return ErrCertTooShort
 	}
@@ -133,7 +133,7 @@ func (c *Cert) UnmarshalBinary(b []byte) (err error) {
 }
 
 // VerifyDate checks that the cert is valid at this moment.
-func (c *Cert) VerifyDate() (ok bool) {
+func (c *Certificate) VerifyDate() (ok bool) {
 	if c.NotBefore >= c.NotAfter {
 		return false
 	}
@@ -148,7 +148,7 @@ func (c *Cert) VerifyDate() (ok bool) {
 
 // VerifySignature checks if the cert is properly signed with the specified
 // signature.  publicKey must not be nil.
-func (c *Cert) VerifySignature(publicKey ed25519.PublicKey) (ok bool) {
+func (c *Certificate) VerifySignature(publicKey ed25519.PublicKey) (ok bool) {
 	b := make([]byte, 52)
 	c.writeSigned(b)
 
@@ -156,23 +156,30 @@ func (c *Cert) VerifySignature(publicKey ed25519.PublicKey) (ok bool) {
 }
 
 // Sign creates cert signature.  privateKey must not be nil.
-func (c *Cert) Sign(privateKey ed25519.PrivateKey) {
+func (c *Certificate) Sign(privateKey ed25519.PrivateKey) {
 	b := make([]byte, 52)
 	c.writeSigned(b)
 	signature := ed25519.Sign(privateKey, b)
 	copy(c.Signature[:64], signature[:64])
 }
 
-// String returns Cert's string representation.
-func (c *Cert) String() (s string) {
-	return fmt.Sprintf("Certificate Serial=%d NotBefore=%s NotAfter=%s ESVersion=%s",
-		c.Serial, time.Unix(int64(c.NotBefore), 0).String(),
-		time.Unix(int64(c.NotAfter), 0).String(), c.ESVersion.String())
+// type check
+var _ fmt.Stringer = (*Certificate)(nil)
+
+// String implements the [fmt.Stringer] interface for *Certificate.
+func (c *Certificate) String() (s string) {
+	return fmt.Sprintf(
+		"Certificate Serial=%d NotBefore=%s NotAfter=%s ESVersion=%s",
+		c.Serial,
+		time.Unix(int64(c.NotBefore), 0),
+		time.Unix(int64(c.NotAfter), 0),
+		c.ESVersion,
+	)
 }
 
-// writeSigned writes (<resolver-pk> <client-magic> <serial> <ts-start>
-// <ts-end> <extensions>).
-func (c *Cert) writeSigned(dst []byte) {
+// writeSigned writes certificate to dst using the following schema:
+// <resolver-pk> <client-magic> <serial> <ts-start> <ts-end>
+func (c *Certificate) writeSigned(dst []byte) {
 	copy(dst[:32], c.ResolverPk[:KeySize])
 	copy(dst[32:40], c.ClientMagic[:clientMagicSize])
 	binary.BigEndian.PutUint32(dst[40:44], c.Serial)

@@ -42,7 +42,7 @@ type ServerConfig struct {
 	Handler Handler
 
 	// ResolverCert contains resolver certificate.  It must not be nil.
-	ResolverCert *Cert
+	ResolverCert *Certificate
 
 	// Logger is a logger instance for Server.  If not set, slog.Default() will
 	// be used.
@@ -73,8 +73,10 @@ func (c *ServerConfig) Validate() (err error) {
 // TODO(f.setrakov): Consider implementing [service.Interface].
 type Server struct {
 	handler      Handler
-	resolverCert *Cert
+	resolverCert *Certificate
 	logger       *slog.Logger
+	// wg tracks active workers (servers).
+	wg *sync.WaitGroup
 	// tcpListeners tracks active TCP listeners.
 	tcpListeners map[net.Listener]struct{}
 	// udpListeners tracks active UDP listeners.
@@ -84,11 +86,9 @@ type Server struct {
 	// TODO(f.setrakov): Consider using syncutil.Map.
 	tcpConns     map[net.Conn]struct{}
 	providerName string
-	// wg tracks active workers (servers).
-	wg      sync.WaitGroup
-	udpSize uint
-	// lock protects access to all the fields below.
-	lock sync.RWMutex
+	udpSize      uint
+	// mu protects concurrent access to listeners, conns, wg and started.
+	mu sync.RWMutex
 	// initOnce makes sure init is called only once.
 	initOnce sync.Once
 	// started indicates whether the server is processing queries.
@@ -104,10 +104,11 @@ func NewServer(conf *ServerConfig) (s *Server, err error) {
 	}
 
 	return &Server{
-		handler:      cmp.Or(conf.Handler, DefaultHandler),
+		handler:      cmp.Or(conf.Handler, defaultDNSCryptHandler),
 		resolverCert: conf.ResolverCert,
 		providerName: conf.ProviderName,
 		logger:       cmp.Or(conf.Logger, slog.Default()),
+		wg:           &sync.WaitGroup{},
 		udpSize:      cmp.Or(conf.UDPSize, defaultUDPSize),
 	}, nil
 }
@@ -115,14 +116,14 @@ func NewServer(conf *ServerConfig) (s *Server, err error) {
 // prepareShutdown prepares the server to shutdown: unblocks reads from all
 // connections related to this server, marks the server as stopped.  If the
 // server is not started, returns [ErrServerNotStarted].
-func (s *Server) prepareShutdown(ctx context.Context) (err error) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+func (s *Server) prepareShutdown(ctx context.Context) (srvWg *sync.WaitGroup, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	if !s.started {
 		s.logger.InfoContext(ctx, "server is not started")
 
-		return ErrServerNotStarted
+		return nil, ErrServerNotStarted
 	}
 
 	s.started = false
@@ -148,7 +149,12 @@ func (s *Server) prepareShutdown(ctx context.Context) (err error) {
 		_ = l.SetReadDeadline(longTimeAgo)
 	}
 
-	return nil
+	// NOTE: To prevent panics, we should not allow wait group reuse.  See
+	// https://github.com/ameshkov/dnscrypt/issues/23.
+	prevWg := s.wg
+	s.wg = &sync.WaitGroup{}
+
+	return prevWg, nil
 }
 
 // type check
@@ -160,14 +166,16 @@ var _ service.Shutdowner = (*Server)(nil)
 func (s *Server) Shutdown(ctx context.Context) (err error) {
 	s.logger.InfoContext(ctx, "shutting down the DNSCrypt server")
 
-	err = s.prepareShutdown(ctx)
+	srvWg, err := s.prepareShutdown(ctx)
 	if err != nil {
 		return fmt.Errorf("preparing shutdown: %w", err)
 	}
 
 	closed := make(chan struct{})
 	go func() {
-		s.wg.Wait()
+		defer slogutil.RecoverAndLog(ctx, s.logger)
+
+		srvWg.Wait()
 		s.logger.InfoContext(ctx, "serve goroutines finished their work")
 		close(closed)
 	}()
@@ -196,9 +204,10 @@ func (s *Server) init() {
 // isStarted returns true if the server is processing queries right now.  It
 // means that [Server.ServeTCP] and/or [Server.ServeUDP] have been called.
 func (s *Server) isStarted() (ok bool) {
-	s.lock.RLock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	started := s.started
-	s.lock.RUnlock()
 
 	return started
 }
@@ -228,8 +237,8 @@ func (s *Server) serveDNS(ctx context.Context, rw ResponseWriter, r *dns.Msg) (e
 }
 
 // encrypt encrypts DNSCrypt response.  m must not be nil.
-func (s *Server) encrypt(m *dns.Msg, q EncryptedQuery) (encrypted []byte, err error) {
-	r := EncryptedResponse{
+func (s *Server) encrypt(m *dns.Msg, q *encryptedQuery) (encrypted []byte, err error) {
+	r := &encryptedResponse{
 		ESVersion: q.ESVersion,
 		Nonce:     q.Nonce,
 	}
@@ -243,24 +252,24 @@ func (s *Server) encrypt(m *dns.Msg, q EncryptedQuery) (encrypted []byte, err er
 		return nil, fmt.Errorf("computing shared key: %w", err)
 	}
 
-	return r.Encrypt(packet, sharedKey)
+	return r.encrypt(packet, sharedKey)
 }
 
 // decrypt decrypts the incoming message and returns a DNS message to process.
-func (s *Server) decrypt(b []byte) (msg *dns.Msg, query EncryptedQuery, err error) {
-	query = EncryptedQuery{
+func (s *Server) decrypt(b []byte) (msg *dns.Msg, query *encryptedQuery, err error) {
+	query = &encryptedQuery{
 		ESVersion:   s.resolverCert.ESVersion,
 		ClientMagic: s.resolverCert.ClientMagic,
 	}
-	decrypted, err := query.Decrypt(b, s.resolverCert.ResolverSk)
+	decrypted, err := query.decrypt(b, s.resolverCert.ResolverSk)
 	if err != nil {
-		return nil, query, fmt.Errorf("decrypting query: %w", err)
+		return nil, nil, fmt.Errorf("decrypting query: %w", err)
 	}
 
 	msg = &dns.Msg{}
 	err = msg.Unpack(decrypted)
 	if err != nil {
-		return nil, query, fmt.Errorf("unpacking dns message: %w", err)
+		return nil, nil, fmt.Errorf("unpacking dns message: %w", err)
 	}
 
 	return msg, query, nil
@@ -314,4 +323,22 @@ func (s *Server) getCertTXT() (cert string) {
 	certBuf, _ := s.resolverCert.MarshalBinary()
 
 	return packTxtString(certBuf)
+}
+
+// isConnClosed checks if the error signals a closed server connection.
+func isConnClosed(err error) (ok bool) {
+	if err == nil {
+		return false
+	}
+
+	nerr, ok := err.(*net.OpError)
+	if !ok {
+		return false
+	}
+
+	if strings.Contains(nerr.Err.Error(), "use of closed network connection") {
+		return true
+	}
+
+	return false
 }

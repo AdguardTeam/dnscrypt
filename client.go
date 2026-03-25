@@ -21,7 +21,7 @@ import (
 type ResolverInfo struct {
 	// ResolverCert contains certificate info (obtained with the first
 	// unencrypted DNS request).
-	ResolverCert *Cert
+	ResolverCert *Certificate
 
 	// ServerAddress is the server IP address.
 	ServerAddress string
@@ -242,7 +242,7 @@ func (c *Client) readResponse(ctx context.Context, conn net.Conn) (resp []byte, 
 // encrypt encrypts a DNS message using shared key from the resolver info.  m
 // and info must not be nil.
 func (c *Client) encrypt(m *dns.Msg, info *ResolverInfo) (msg []byte, err error) {
-	q := EncryptedQuery{
+	q := &encryptedQuery{
 		ESVersion:   info.ResolverCert.ESVersion,
 		ClientMagic: info.ResolverCert.ClientMagic,
 		ClientPk:    info.PublicKey,
@@ -252,7 +252,7 @@ func (c *Client) encrypt(m *dns.Msg, info *ResolverInfo) (msg []byte, err error)
 		return nil, fmt.Errorf("packing dns message: %w", err)
 	}
 
-	msg, err = q.Encrypt(query, info.SharedKey)
+	msg, err = q.encrypt(query, info.SharedKey)
 	if err != nil {
 		return nil, fmt.Errorf("encrypting message: %w", err)
 	}
@@ -267,11 +267,11 @@ func (c *Client) encrypt(m *dns.Msg, info *ResolverInfo) (msg []byte, err error)
 // decrypt decrypts a DNS message using a shared key from the resolver info.
 // info must not be nil.
 func (c *Client) decrypt(b []byte, info *ResolverInfo) (msg *dns.Msg, err error) {
-	dr := EncryptedResponse{
+	dr := &encryptedResponse{
 		ESVersion: info.ResolverCert.ESVersion,
 	}
 
-	response, err := dr.Decrypt(b, info.SharedKey)
+	response, err := dr.decrypt(b, info.SharedKey)
 	if err != nil {
 		return nil, fmt.Errorf("decrypting server response: %w", err)
 	}
@@ -289,7 +289,7 @@ func (c *Client) decrypt(b []byte, info *ResolverInfo) (msg *dns.Msg, err error)
 func (c *Client) fetchCert(
 	ctx context.Context,
 	stamp dnsstamps.ServerStamp,
-) (cert *Cert, err error) {
+) (cert *Certificate, err error) {
 	providerName := stamp.ProviderName
 	if !strings.HasSuffix(providerName, ".") {
 		providerName = providerName + "."
@@ -307,7 +307,7 @@ func (c *Client) fetchCert(
 		return nil, ErrFailedToFetchCert
 	}
 
-	cert = &Cert{}
+	cert = &Certificate{}
 	for _, rr := range r.Answer {
 		currentCert := c.parseCertFromTXT(ctx, stamp.ServerPk, rr, cert, providerName)
 		if currentCert != nil {
@@ -332,9 +332,9 @@ func (c *Client) parseCertFromTXT(
 	ctx context.Context,
 	serverPk ed25519.PublicKey,
 	rr dns.RR,
-	currentCert *Cert,
+	currentCert *Certificate,
 	providerName string,
-) (cert *Cert) {
+) (cert *Certificate) {
 	txt, ok := rr.(*dns.TXT)
 	if !ok {
 		return nil
@@ -358,12 +358,12 @@ func (c *Client) parseCertFromTXT(
 func (c *Client) parseCert(
 	ctx context.Context,
 	serverPk ed25519.PublicKey,
-	currentCert *Cert,
+	currentCert *Certificate,
 	providerName string,
 	certStr string,
-) (cert *Cert, err error) {
+) (cert *Certificate, err error) {
 	certBytes := unpackTxtString(certStr)
-	cert = &Cert{}
+	cert = &Certificate{}
 	err = cert.UnmarshalBinary(certBytes)
 	if err != nil {
 		return nil, fmt.Errorf("deserializing cert for: %w", err)
@@ -419,7 +419,10 @@ func (c *Client) parseCert(
 
 // verifyCert verifies the date and signature of the certificate.  cert must not
 // be nil.
-func verifyCert(cert *Cert, serverPk ed25519.PublicKey) (err error) {
+//
+// TODO(f.setrakov): Consider validating the date separately and use
+// [Certificate.Validate].
+func verifyCert(cert *Certificate, serverPk ed25519.PublicKey) (err error) {
 	if !cert.VerifyDate() {
 		return ErrInvalidDate
 	}

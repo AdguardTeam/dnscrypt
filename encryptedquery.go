@@ -11,12 +11,12 @@ import (
 	"golang.org/x/crypto/nacl/secretbox"
 )
 
-// EncryptedQuery is a structure for encrypting and decrypting client queries.
+// encryptedQuery is a structure for encrypting and decrypting client queries.
 //
 // NOTE: Client Queries are using the following schema:
 // <dnscrypt-query> ::= <client-magic> <client-pk> <client-nonce> <encrypted-query>
 // <encrypted-query> ::= AE(<shared-key> <client-nonce> <client-nonce-pad>, <client-query> <client-query-pad>)
-type EncryptedQuery struct {
+type encryptedQuery struct {
 	// ESVersion contains used encryption.
 	ESVersion CryptoConstruction
 
@@ -37,9 +37,9 @@ type EncryptedQuery struct {
 	Nonce [nonceSize]byte
 }
 
-// Encrypt encrypts the specified DNS query, returns encrypted data ready to be
+// encrypt encrypts the specified DNS query, returns encrypted data ready to be
 // sent.  q.ESVersion, q.ClientMagic and q.ClientPk must be set.
-func (q *EncryptedQuery) Encrypt(
+func (q *encryptedQuery) encrypt(
 	packet []byte,
 	sharedKey [SharedKeySize]byte,
 ) (query []byte, err error) {
@@ -67,9 +67,9 @@ func (q *EncryptedQuery) Encrypt(
 	return query, nil
 }
 
-// Decrypt decrypts the client query, returns decrypted DNS packet.
+// decrypt decrypts the client query, returns decrypted DNS packet.
 // q.ClientMagic and q.ESVersion must be set.
-func (q *EncryptedQuery) Decrypt(
+func (q *encryptedQuery) decrypt(
 	query []byte,
 	serverSecretKey [KeySize]byte,
 ) (packet []byte, err error) {
@@ -114,7 +114,7 @@ func (q *EncryptedQuery) Decrypt(
 
 // decryptES decrypts the query using the configured encryption method and the
 // given shared key.
-func (q *EncryptedQuery) decryptES(
+func (q *encryptedQuery) decryptES(
 	query []byte,
 	sharedKey [xsecretbox.KeySize]byte,
 ) (packet []byte, err error) {

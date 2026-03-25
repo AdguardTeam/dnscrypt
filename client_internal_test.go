@@ -14,7 +14,7 @@ import (
 const testTimeout = time.Second
 
 // certToString is a helper that returns the certificate string representation.
-func certToString(tb testing.TB, cert *Cert) (s string) {
+func certToString(tb testing.TB, cert *Certificate) (s string) {
 	tb.Helper()
 
 	b, _ := cert.MarshalBinary()
@@ -24,7 +24,7 @@ func certToString(tb testing.TB, cert *Cert) (s string) {
 
 // newTestCertStr is a helper that creates a new certificate using the values in
 // defaultCert as defaults and signs it.
-func newTestCert(tb testing.TB, sk ed25519.PrivateKey, defaultCert, newCert *Cert) (c *Cert) {
+func newTestCert(tb testing.TB, sk ed25519.PrivateKey, defaultCert, newCert *Certificate) (c *Certificate) {
 	tb.Helper()
 
 	newCert = cmp.Or(newCert, defaultCert)
@@ -50,8 +50,8 @@ func TestClient_parseCert(t *testing.T) {
 	client := NewClient(&ClientConfig{})
 
 	testCases := []struct {
-		currentCert *Cert
-		wantCert    *Cert
+		currentCert *Certificate
+		wantCert    *Certificate
 		name        string
 		certStr     string
 		wantErrMsg  string
@@ -59,14 +59,14 @@ func TestClient_parseCert(t *testing.T) {
 	}{{
 		name:        "invalid_cert_data",
 		serverPk:    validPk,
-		currentCert: &Cert{},
+		currentCert: &Certificate{},
 		certStr:     "invalid",
 		wantErrMsg:  "deserializing cert for: cert is too short",
 	}, {
 		name:        "expired_cert",
 		serverPk:    validPk,
-		currentCert: &Cert{},
-		certStr: certToString(t, newTestCert(t, validSk, validCert, &Cert{
+		currentCert: &Certificate{},
+		certStr: certToString(t, newTestCert(t, validSk, validCert, &Certificate{
 			NotBefore: 1,
 			NotAfter:  2,
 		})),
@@ -74,43 +74,43 @@ func TestClient_parseCert(t *testing.T) {
 	}, {
 		name:        "invalid_signature",
 		serverPk:    validPk,
-		currentCert: &Cert{},
+		currentCert: &Certificate{},
 		certStr:     certToString(t, newTestCert(t, wrongSk, validCert, nil)),
 		wantErrMsg:  "verifying cert: " + string(ErrInvalidCertSignature),
 	}, {
 		name:        "wrong_public_key",
 		serverPk:    wrongPk,
-		currentCert: &Cert{},
+		currentCert: &Certificate{},
 		certStr:     certToString(t, newTestCert(t, validSk, validCert, nil)),
 		wantErrMsg:  "verifying cert: " + string(ErrInvalidCertSignature),
 	}, {
 		name:        "valid_cert",
 		serverPk:    validPk,
-		currentCert: &Cert{},
+		currentCert: &Certificate{},
 		certStr:     certToString(t, newTestCert(t, validSk, validCert, nil)),
-		wantCert: newTestCert(t, validSk, validCert, &Cert{
+		wantCert: newTestCert(t, validSk, validCert, &Certificate{
 			ResolverPk: validCert.ResolverPk,
 		}),
 	}, {
 		name:        "newer_serial",
 		serverPk:    validPk,
 		currentCert: validCert,
-		certStr: certToString(t, newTestCert(t, validSk, validCert, &Cert{
+		certStr: certToString(t, newTestCert(t, validSk, validCert, &Certificate{
 			Serial: validCert.Serial + 1,
 		})),
-		wantCert: newTestCert(t, validSk, validCert, &Cert{
+		wantCert: newTestCert(t, validSk, validCert, &Certificate{
 			Serial: validCert.Serial + 1,
 		}),
 	}, {
 		name:        "older_serial",
 		serverPk:    validPk,
-		currentCert: &Cert{Serial: validCert.Serial + 1},
+		currentCert: &Certificate{Serial: validCert.Serial + 1},
 		certStr:     certToString(t, newTestCert(t, validSk, validCert, nil)),
 	}, {
 		name:        "same_serial_lower_es",
 		serverPk:    validPk,
 		currentCert: validCert,
-		certStr: certToString(t, newTestCert(t, validSk, validCert, &Cert{
+		certStr: certToString(t, newTestCert(t, validSk, validCert, &Certificate{
 			ESVersion: XSalsa20Poly1305,
 		})),
 	}, {

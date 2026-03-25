@@ -1,7 +1,6 @@
 package dnscrypt
 
 import (
-	"bytes"
 	"crypto/rand"
 	"testing"
 
@@ -20,8 +19,8 @@ func TestDNSCryptQueryEncryptDecryptXChacha20Poly1305(t *testing.T) {
 	testDNSCryptQueryEncryptDecrypt(t, XChacha20Poly1305)
 }
 
-// estDNSCryptQueryEncryptDecrypt is a helper that checks that the
-// [EncryptedQuery] with the specified cryptographic construction correctly
+// testDNSCryptQueryEncryptDecrypt is a helper that checks that the
+// [encryptedQuery] with the specified cryptographic construction correctly
 // encrypts and decrypts data.
 func testDNSCryptQueryEncryptDecrypt(tb testing.TB, esVersion CryptoConstruction) {
 	tb.Helper()
@@ -35,7 +34,7 @@ func testDNSCryptQueryEncryptDecrypt(tb testing.TB, esVersion CryptoConstruction
 	clientMagic := [clientMagicSize]byte{}
 	_, _ = rand.Read(clientMagic[:])
 
-	q1 := EncryptedQuery{
+	q1 := &encryptedQuery{
 		ESVersion:   esVersion,
 		ClientPk:    clientPublicKey,
 		ClientMagic: clientMagic,
@@ -44,17 +43,16 @@ func testDNSCryptQueryEncryptDecrypt(tb testing.TB, esVersion CryptoConstruction
 	packet := make([]byte, 100)
 	_, _ = rand.Read(packet[:])
 
-	encrypted, err := q1.Encrypt(packet, clientSharedKey)
+	encrypted, err := q1.encrypt(packet, clientSharedKey)
 	require.NoError(tb, err)
 
-	q2 := EncryptedQuery{
+	q2 := &encryptedQuery{
 		ESVersion:   esVersion,
 		ClientMagic: clientMagic,
 	}
 
-	decrypted, err := q2.Decrypt(encrypted, serverSecretKey)
+	decrypted, err := q2.decrypt(encrypted, serverSecretKey)
 	require.NoError(tb, err)
 
-	// Check that packet is the same.
-	require.True(tb, bytes.Equal(packet, decrypted))
+	require.Equal(tb, packet, decrypted)
 }

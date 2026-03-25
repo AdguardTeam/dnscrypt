@@ -11,12 +11,12 @@ import (
 	"golang.org/x/crypto/nacl/secretbox"
 )
 
-// EncryptedResponse is used for encrypting/decrypting server responses.
+// encryptedResponse is used for encrypting/decrypting server responses.
 //
 // NOTE: Server responses are using the following schema:
 // <dnscrypt-response> ::= <resolver-magic> <nonce> <encrypted-response>
 // <encrypted-response> ::= AE(<shared-key>, <nonce>, <resolver-response> <resolver-response-pad>)
-type EncryptedResponse struct {
+type encryptedResponse struct {
 	// ESVersion is the encryption to use.
 	ESVersion CryptoConstruction
 
@@ -25,8 +25,8 @@ type EncryptedResponse struct {
 	Nonce [nonceSize]byte
 }
 
-// Encrypt encrypts the server response.  r.ESVersion and r.Nonce must be set.
-func (r *EncryptedResponse) Encrypt(
+// encrypt encrypts the server response.  r.ESVersion and r.Nonce must be set.
+func (r *encryptedResponse) encrypt(
 	packet []byte,
 	sharedKey [SharedKeySize]byte,
 ) (response []byte, err error) {
@@ -53,8 +53,8 @@ func (r *EncryptedResponse) Encrypt(
 	return response, nil
 }
 
-// Decrypt decrypts the server response.  r.ESVersion must be set.
-func (r *EncryptedResponse) Decrypt(
+// decrypt decrypts the server response.  r.ESVersion must be set.
+func (r *encryptedResponse) decrypt(
 	response []byte,
 	sharedKey [SharedKeySize]byte,
 ) (packet []byte, err error) {
@@ -75,7 +75,7 @@ func (r *EncryptedResponse) Decrypt(
 	case XChacha20Poly1305:
 		packet, err = xsecretbox.Open(nil, r.Nonce[:], encryptedResponse, sharedKey[:])
 		if err != nil {
-			return nil, fmt.Errorf("encrypting query: %s: %w", r.ESVersion, err)
+			return nil, fmt.Errorf("decrypting response: %s: %w", r.ESVersion, err)
 		}
 	case XSalsa20Poly1305:
 		var xsalsaServerNonce [24]byte
@@ -83,7 +83,7 @@ func (r *EncryptedResponse) Decrypt(
 		var ok bool
 		packet, ok = secretbox.Open(nil, encryptedResponse, &xsalsaServerNonce, &sharedKey)
 		if !ok {
-			return nil, fmt.Errorf("encrypting query: %s: %w", r.ESVersion, err)
+			return nil, fmt.Errorf("decrypting response: %s: %w", r.ESVersion, err)
 		}
 	default:
 		return nil, ErrESVersion

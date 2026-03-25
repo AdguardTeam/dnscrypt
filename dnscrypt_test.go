@@ -13,21 +13,17 @@ import (
 	"github.com/AdguardTeam/dnscrypt"
 	"github.com/AdguardTeam/golibs/logutil/slogutil"
 	"github.com/AdguardTeam/golibs/netutil"
+	"github.com/AdguardTeam/golibs/service"
 	"github.com/AdguardTeam/golibs/testutil"
 	"github.com/ameshkov/dnsstamps"
 	"github.com/miekg/dns"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// testTimeout is a common timeout for tests.
-const testTimeout = time.Second
-
-var (
-	// testLogger is a common logger for tests.
-	testLogger = slogutil.NewDiscardLogger()
-
-	// testIPv4 is a common IPv4 address that is used for testing.
-	testIPv4 = netip.MustParseAddr("192.0.2.0")
+const (
+	// testTimeout is a common timeout for tests.
+	testTimeout = time.Second
 
 	// testTTL is a common DNS record TTL value that is used for testing.
 	testTTL = 5 * time.Minute
@@ -41,6 +37,14 @@ var (
 	// testFQDN is a common FQDN value for tests.  It is FQDN for
 	// [testHostname].
 	testFQDN = testHostname + "."
+)
+
+var (
+	// testLogger is a common logger for tests.
+	testLogger = slogutil.NewDiscardLogger()
+
+	// testIPv4 is a common IPv4 address that is used for testing.
+	testIPv4 = netip.MustParseAddr("192.0.2.0")
 )
 
 // newTestClient *Client initialized with fields from conf.  All the missing
@@ -79,7 +83,8 @@ func assertTestMessageResponse(tb testing.TB, reply *dns.Msg) {
 	require.Len(tb, reply.Answer, 1)
 
 	a := testutil.RequireTypeAssert[*dns.A](tb, reply.Answer[0])
-	require.Equal(tb, net.IP(testIPv4.AsSlice()), a.A)
+
+	assert.Equal(tb, net.IP(testIPv4.AsSlice()), a.A)
 }
 
 // newTestServerStamp creates a dnsstamps.ServerStamp for the given test server
@@ -118,6 +123,9 @@ func (s *testServer) UDPAddr() (addr *net.UDPAddr) {
 	return s.udpConn.LocalAddr().(*net.UDPAddr)
 }
 
+// type check
+var _ service.Shutdowner = (*testServer)(nil)
+
 // Shutdown implements the [service.Shutdowner] for *testServer.
 func (s *testServer) Shutdown(ctx context.Context) (err error) {
 	err = s.server.Shutdown(ctx)
@@ -128,12 +136,16 @@ func (s *testServer) Shutdown(ctx context.Context) (err error) {
 }
 
 // newTestServer returns properly initialized *testServer.
-func newTestServer(tb testing.TB, handler dnscrypt.Handler) (server *testServer, cert *dnscrypt.Cert) {
+func newTestServer(
+	tb testing.TB,
+	handler dnscrypt.Handler,
+) (server *testServer, cert *dnscrypt.Certificate) {
 	tb.Helper()
 
 	rc, err := dnscrypt.GenerateResolverConfig(prefixedHostname, nil)
 	require.NoError(tb, err)
-	cert, err = rc.CreateCert()
+
+	cert, err = rc.NewCert()
 	require.NoError(tb, err)
 
 	s, err := dnscrypt.NewServer(&dnscrypt.ServerConfig{
@@ -146,6 +158,7 @@ func newTestServer(tb testing.TB, handler dnscrypt.Handler) (server *testServer,
 
 	privateKey, err := dnscrypt.HexDecodeKey(rc.PrivateKey)
 	require.NoError(tb, err)
+
 	publicKey := ed25519.PrivateKey(privateKey).Public().(ed25519.PublicKey)
 	srv := &testServer{
 		server:     s,
@@ -163,6 +176,7 @@ func newTestServer(tb testing.TB, handler dnscrypt.Handler) (server *testServer,
 	go func() {
 		_ = s.ServeUDP(ctx, srv.udpConn)
 	}()
+
 	go func() {
 		_ = s.ServeTCP(ctx, srv.tcpListen)
 	}()
@@ -174,10 +188,11 @@ func newTestServer(tb testing.TB, handler dnscrypt.Handler) (server *testServer,
 	return srv, cert
 }
 
-// testHandler is the default implementation of the [Handler] for tests.
+// testHandler is the default implementation of the [dnscrypt.Handler] for
+// tests.
 type testHandler struct{}
 
-// ServeDNS implements the [Handler] interface for *testHandler.
+// ServeDNS implements the [dnscrypt.Handler] interface for *testHandler.
 func (h *testHandler) ServeDNS(
 	ctx context.Context,
 	rw dnscrypt.ResponseWriter,
@@ -200,13 +215,17 @@ func (h *testHandler) ServeDNS(
 	return rw.WriteMsg(ctx, res)
 }
 
-// testLargeMsgHandler is the implementation of the [Handler] interface that
-// returns a huge response used for testing message truncation.
+// testLargeMsgHandler is the implementation of the [dnscrypt.Handler] interface
+// that returns a huge response used for testing message truncation.
 //
 // TODO(f.setrakov): Add a mock implementation in internal/dnscrypttest.
 type testLargeMsgHandler struct{}
 
-// ServeDNS implements the [Handler] interface for *testLargeMsgHandler.
+// type check
+var _ dnscrypt.Handler = (*testLargeMsgHandler)(nil)
+
+// ServeDNS implements the [dnscrypt.Handler] interface for
+// *testLargeMsgHandler.
 func (h *testLargeMsgHandler) ServeDNS(
 	ctx context.Context,
 	rw dnscrypt.ResponseWriter,

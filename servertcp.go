@@ -15,9 +15,9 @@ import (
 	"github.com/miekg/dns"
 )
 
-// TCPResponseWriter is the implementation of the [ResponseWriter] interface for
+// tcpResponseWriter is the implementation of the [ResponseWriter] interface for
 // TCP.
-type TCPResponseWriter struct {
+type tcpResponseWriter struct {
 	// tcpConn contains TCP connection.  It must not be nil.
 	tcpConn net.Conn
 
@@ -28,28 +28,28 @@ type TCPResponseWriter struct {
 	// req contains processed DNS query.
 	req *dns.Msg
 
-	// encrypt contains DNSCrypt encryption function.
-	encrypt encryptionFunc
+	// query contains DNSCrypt query properties.  It must not be nil.
+	query *encryptedQuery
 
-	// query contains DNSCrypt query properties.
-	query EncryptedQuery
+	// encrypt contains DNSCrypt encryption function.  It must not be nil.
+	encrypt encryptionFunc
 }
 
 // type check
-var _ ResponseWriter = &TCPResponseWriter{}
+var _ ResponseWriter = &tcpResponseWriter{}
 
-// LocalAddr implements the [ResponseWriter] interface for *TCPResponseWriter.
-func (w *TCPResponseWriter) LocalAddr() (addr net.Addr) {
+// LocalAddr implements the [ResponseWriter] interface for *tcpResponseWriter.
+func (w *tcpResponseWriter) LocalAddr() (addr net.Addr) {
 	return w.tcpConn.LocalAddr()
 }
 
-// RemoteAddr implements the [ResponseWriter] interface for *TCPResponseWriter.
-func (w *TCPResponseWriter) RemoteAddr() (addr net.Addr) {
+// RemoteAddr implements the [ResponseWriter] interface for *tcpResponseWriter.
+func (w *tcpResponseWriter) RemoteAddr() (addr net.Addr) {
 	return w.tcpConn.RemoteAddr()
 }
 
-// WriteMsg implements the [ResponseWriter] interface for *TCPResponseWriter.
-func (w *TCPResponseWriter) WriteMsg(ctx context.Context, m *dns.Msg) (err error) {
+// WriteMsg implements the [ResponseWriter] interface for *tcpResponseWriter.
+func (w *tcpResponseWriter) WriteMsg(ctx context.Context, m *dns.Msg) (err error) {
 	normalize(ProtoTCP, w.req, m)
 
 	res, err := w.encrypt(m, w.query)
@@ -64,21 +64,28 @@ func (w *TCPResponseWriter) WriteMsg(ctx context.Context, m *dns.Msg) (err error
 
 // ServeTCP listens for TCP connections and handles them.  It blocks the calling
 // goroutine and to stop it you need to close the listener or call
-// [Server.Shutdown].  l must not be nil.
+// [Server.Shutdown].  l must not be nil.  It blocks on a successful start.
 func (s *Server) ServeTCP(ctx context.Context, l net.Listener) (err error) {
-	s.prepareServeTCP(l)
+	defer slogutil.RecoverAndLog(ctx, s.logger)
+
+	srvWg := s.prepareServeTCP(l)
 
 	s.logger.InfoContext(ctx, "entering DNSCrypt TCP listening loop", "listenAddr", l.Addr())
 
 	tcpWg := &sync.WaitGroup{}
-	defer s.cleanUpTCP(tcpWg, l)
-
-	s.wg.Add(1)
+	defer s.cleanUpTCP(srvWg, tcpWg, l)
 
 	certTxt := s.getCertTXT()
 
 	for s.isStarted() {
-		if s.serveTCPLoop(ctx, certTxt, l, tcpWg) {
+		var stopped bool
+		stopped, err = s.serveTCPLoop(ctx, certTxt, l, tcpWg)
+		if err != nil {
+			// Don't wrap the error as it is informative enough.
+			return err
+		}
+
+		if stopped {
 			break
 		}
 	}
@@ -94,16 +101,16 @@ func (s *Server) serveTCPLoop(
 	certTxt string,
 	l net.Listener,
 	tcpWg *sync.WaitGroup,
-) (shutdown bool) {
+) (stopped bool, err error) {
 	conn, err := l.Accept()
 	if err != nil {
 		if !s.isStarted() {
-			return true
+			return true, nil
 		}
 
 		var netErr net.Error
 		if errors.As(err, &netErr) && netErr.Timeout() {
-			return false
+			return false, nil
 		}
 
 		if isConnClosed(err) {
@@ -116,50 +123,60 @@ func (s *Server) serveTCPLoop(
 			)
 		}
 
-		return true
+		return true, fmt.Errorf("reading tcp message: %w", err)
 	}
 
 	// Track the connection to allow unblocking reads on shutdown.
-	s.lock.Lock()
-	s.tcpConns[conn] = struct{}{}
-	s.lock.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	tcpWg.Add(1)
-	go func() {
+	s.tcpConns[conn] = struct{}{}
+
+	tcpWg.Go(func() {
+		defer slogutil.RecoverAndLog(ctx, s.logger)
+
 		_ = s.handleTCPConnection(ctx, conn, certTxt)
 		_ = conn.Close()
-		s.lock.Lock()
-		delete(s.tcpConns, conn)
-		s.lock.Unlock()
-		tcpWg.Done()
-	}()
 
-	return false
+		s.mu.Lock()
+		defer s.mu.Unlock()
+
+		delete(s.tcpConns, conn)
+	})
+
+	return false, nil
 }
 
 // prepareServeTCP prepares the server and listener for DNSCrypt service.  l
 // must not be nil.
-func (s *Server) prepareServeTCP(l net.Listener) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+func (s *Server) prepareServeTCP(l net.Listener) (prevWg *sync.WaitGroup) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	s.initOnce.Do(s.init)
 
 	// NOTE: We do not check whether the server has already been started, as
 	// Serve* methods can be called multiple times.
 	s.started = true
 	s.tcpListeners[l] = struct{}{}
+
+	srvWg := s.wg
+	srvWg.Add(1)
+
+	return srvWg
 }
 
 // cleanUpTCP waits until all TCP messages before cleaning up.  tcpWg and l must
 // not be nil.
-func (s *Server) cleanUpTCP(tcpWg *sync.WaitGroup, l net.Listener) {
+func (s *Server) cleanUpTCP(srvWg, tcpWg *sync.WaitGroup, l net.Listener) {
 	tcpWg.Wait()
 
-	s.lock.Lock()
-	delete(s.tcpListeners, l)
-	s.lock.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	s.wg.Done()
+	delete(s.tcpListeners, l)
+
+	srvWg.Done()
 }
 
 // handleTCPMsg handles a single TCP message.  If this method returns error
@@ -195,7 +212,7 @@ func (s *Server) handleTCPMsg(
 		return fmt.Errorf("failed to decrypt incoming message: %w", err)
 	}
 
-	rw := &TCPResponseWriter{
+	rw := &tcpResponseWriter{
 		tcpConn: conn,
 		encrypt: s.encrypt,
 		req:     m,
@@ -213,8 +230,6 @@ func (s *Server) handleTCPMsg(
 
 // handleTCPConnection handles all queries that are coming to the specified TCP
 // connection.  conn must not be nil.
-//
-// TODO(f.setrakov): Improve error handling.
 func (s *Server) handleTCPConnection(
 	ctx context.Context,
 	conn net.Conn,

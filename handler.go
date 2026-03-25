@@ -54,9 +54,11 @@ func (h *defaultHandler) ServeDNS(ctx context.Context, rw ResponseWriter, r *dns
 	return rw.WriteMsg(ctx, res)
 }
 
-// DefaultHandler is the default [Handler] implementation that is used by
-// [Server] if custom handler is not configured.
-var DefaultHandler Handler = &defaultHandler{
+// defaultDNSCryptHandler is the default [Handler] implementation that is used
+// by [Server] if custom handler is not configured.
+//
+// TODO(f.setrakov): Remove.
+var defaultDNSCryptHandler Handler = &defaultHandler{
 	udpClient: &dns.Client{
 		Net:     string(ProtoUDP),
 		Timeout: defaultTimeout,

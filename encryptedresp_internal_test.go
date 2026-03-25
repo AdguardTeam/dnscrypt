@@ -1,11 +1,11 @@
 package dnscrypt
 
 import (
-	"bytes"
 	"crypto/rand"
 	"testing"
 
 	"github.com/AdguardTeam/dnscrypt/internal/xsecretbox"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -22,7 +22,7 @@ func TestDNSCryptResponseEncryptDecryptXChacha20Poly1305(t *testing.T) {
 }
 
 // testDNSCryptResponseEncryptDecrypt is a helper that checks that the
-// [EncryptedResponse] with the specified cryptographic construction correctly
+// [encryptedResponse] with the specified cryptographic construction correctly
 // encrypts and decrypts data.
 func testDNSCryptResponseEncryptDecrypt(tb testing.TB, esVersion CryptoConstruction) {
 	tb.Helper()
@@ -36,7 +36,7 @@ func testDNSCryptResponseEncryptDecrypt(tb testing.TB, esVersion CryptoConstruct
 	serverSharedKey, err := computeSharedKey(esVersion, &serverSecretKey, &clientPublicKey)
 	require.NoError(tb, err)
 
-	r1 := &EncryptedResponse{
+	r1 := &encryptedResponse{
 		ESVersion: esVersion,
 	}
 
@@ -45,26 +45,26 @@ func testDNSCryptResponseEncryptDecrypt(tb testing.TB, esVersion CryptoConstruct
 	packet := make([]byte, 100)
 	_, _ = rand.Read(packet[:])
 
-	encrypted, err := r1.Encrypt(packet, serverSharedKey)
+	encrypted, err := r1.encrypt(packet, serverSharedKey)
 	require.NoError(tb, err)
 
-	r2 := &EncryptedResponse{
+	r2 := &encryptedResponse{
 		ESVersion: esVersion,
 	}
 
-	decrypted, err := r2.Decrypt(encrypted, clientSharedKey)
+	decrypted, err := r2.decrypt(encrypted, clientSharedKey)
 	require.NoError(tb, err)
 
-	require.True(tb, bytes.Equal(packet, decrypted))
+	assert.Equal(tb, packet, decrypted)
 
-	_, err = r2.Decrypt(packet, clientSharedKey)
-	require.NotNil(tb, err)
+	_, err = r2.decrypt(packet, clientSharedKey)
+	require.Error(tb, err)
 
-	_, err = r2.Decrypt([]byte{}, clientSharedKey)
-	require.NotNil(tb, err)
+	_, err = r2.decrypt([]byte{}, clientSharedKey)
+	require.Error(tb, err)
 
 	b := make([]byte, len(resolverMagic)+nonceSize+xsecretbox.TagSize+minDNSPacketSize)
 	_, _ = rand.Read(b)
-	_, err = r2.Decrypt(b, clientSharedKey)
-	require.NotNil(tb, err)
+	_, err = r2.decrypt(b, clientSharedKey)
+	require.Error(tb, err)
 }

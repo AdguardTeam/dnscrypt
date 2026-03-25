@@ -51,8 +51,8 @@ type ResolverConfig struct {
 	CertificateTTL time.Duration `yaml:"certificate_ttl"`
 }
 
-// CreateCert generates a signed Cert to be used by Server.
-func (rc *ResolverConfig) CreateCert() (cert *Cert, err error) {
+// NewCert generates a signed Certificate to be used by Server.
+func (rc *ResolverConfig) NewCert() (cert *Certificate, err error) {
 	notAfter := time.Now()
 	if rc.CertificateTTL > 0 {
 		notAfter = notAfter.Add(rc.CertificateTTL)
@@ -60,7 +60,7 @@ func (rc *ResolverConfig) CreateCert() (cert *Cert, err error) {
 		notAfter = notAfter.Add(defaultCertValidity)
 	}
 
-	cert = &Cert{
+	cert = &Certificate{
 		Serial:    uint32(time.Now().Unix()),
 		NotAfter:  uint32(notAfter.Unix()),
 		NotBefore: uint32(time.Now().Unix()),
