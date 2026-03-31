@@ -164,7 +164,7 @@ var _ service.Shutdowner = (*Server)(nil)
 // connections are processed and only after that it leaves the method.  If
 // context deadline is specified, it will exit earlier.
 func (s *Server) Shutdown(ctx context.Context) (err error) {
-	s.logger.InfoContext(ctx, "shutting down the DNSCrypt server")
+	s.logger.InfoContext(ctx, "shutting down the dnscrypt server")
 
 	srvWg, err := s.prepareShutdown(ctx)
 	if err != nil {
@@ -182,9 +182,9 @@ func (s *Server) Shutdown(ctx context.Context) (err error) {
 
 	select {
 	case <-closed:
-		s.logger.InfoContext(ctx, "DNSCrypt server has been stopped")
+		s.logger.InfoContext(ctx, "dnscrypt server has been stopped")
 	case <-ctx.Done():
-		s.logger.InfoContext(ctx, "DNSCrypt server shutdown has timed out")
+		s.logger.InfoContext(ctx, "dnscrypt server shutdown has timed out")
 		err = ctx.Err()
 	}
 

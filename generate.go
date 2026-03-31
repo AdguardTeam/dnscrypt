@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AdguardTeam/golibs/errors"
+	"github.com/AdguardTeam/golibs/validate"
 	"github.com/ameshkov/dnsstamps"
 	"golang.org/x/crypto/curve25519"
 )
@@ -49,6 +51,19 @@ type ResolverConfig struct {
 	// generated using this ResolverConfig.  If not set, we'll use 1 year by
 	// default.
 	CertificateTTL time.Duration `yaml:"certificate_ttl"`
+}
+
+// type check
+var _ validate.Interface = (*ResolverConfig)(nil)
+
+// Validate implements the [validate.Interface] for *ResolverConfig.
+func (rc *ResolverConfig) Validate() (err error) {
+	var errs []error
+	errs = append(errs, validate.NotEmpty("public_key", rc.PublicKey))
+	errs = append(errs, validate.NotEmpty("private_key", rc.PrivateKey))
+	errs = append(errs, validate.NotEmpty("resolver_secret", rc.ResolverSk))
+
+	return errors.Join(errs...)
 }
 
 // NewCert generates a signed Certificate to be used by Server.

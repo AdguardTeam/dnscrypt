@@ -70,7 +70,7 @@ func (s *Server) ServeTCP(ctx context.Context, l net.Listener) (err error) {
 
 	srvWg := s.prepareServeTCP(l)
 
-	s.logger.InfoContext(ctx, "entering DNSCrypt TCP listening loop", "listenAddr", l.Addr())
+	s.logger.InfoContext(ctx, "entering dnscrypt tcp listening loop", "listen_addr", l.Addr())
 
 	tcpWg := &sync.WaitGroup{}
 	defer s.cleanUpTCP(srvWg, tcpWg, l)
@@ -81,7 +81,7 @@ func (s *Server) ServeTCP(ctx context.Context, l net.Listener) (err error) {
 		var stopped bool
 		stopped, err = s.serveTCPLoop(ctx, certTxt, l, tcpWg)
 		if err != nil {
-			// Don't wrap the error as it is informative enough.
+			// Don't wrap the error, because it's informative enough as is.
 			return err
 		}
 

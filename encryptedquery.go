@@ -100,7 +100,7 @@ func (q *encryptedQuery) decrypt(
 
 	packet, err = q.decryptES(encryptedQuery, sharedKey)
 	if err != nil {
-		// Don't wrap the error as it is informative enough.
+		// Don't wrap the error, because it's informative enough as is.
 		return nil, err
 	}
 

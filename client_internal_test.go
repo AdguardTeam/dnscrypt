@@ -7,19 +7,21 @@ import (
 	"time"
 
 	"github.com/AdguardTeam/golibs/testutil"
+	"github.com/miekg/dns"
 	"github.com/stretchr/testify/assert"
 )
 
 // testTimeout is a common timeout for tests.
 const testTimeout = time.Second
 
-// certToString is a helper that returns the certificate string representation.
-func certToString(tb testing.TB, cert *Certificate) (s string) {
+// certToTXT is a helper that returns the string representation of a certificate
+// wrapped inside a DNS TXT record.
+func certToTXT(tb testing.TB, cert *Certificate) (txt *dns.TXT) {
 	tb.Helper()
 
 	b, _ := cert.MarshalBinary()
 
-	return packTxtString(b)
+	return &dns.TXT{Txt: []string{packTxtString(b)}}
 }
 
 // newTestCertStr is a helper that creates a new certificate using the values in
@@ -40,7 +42,7 @@ func newTestCert(tb testing.TB, sk ed25519.PrivateKey, defaultCert, newCert *Cer
 	return newCert
 }
 
-func TestClient_parseCert(t *testing.T) {
+func TestClient_ParseAnswer(t *testing.T) {
 	t.Parallel()
 
 	fqdn := "example.org."
@@ -50,74 +52,95 @@ func TestClient_parseCert(t *testing.T) {
 	client := NewClient(&ClientConfig{})
 
 	testCases := []struct {
-		currentCert *Certificate
-		wantCert    *Certificate
-		name        string
-		certStr     string
-		wantErrMsg  string
-		serverPk    ed25519.PublicKey
+		wantCert *Certificate
+		name     string
+		answer   []dns.RR
+		serverPk ed25519.PublicKey
 	}{{
-		name:        "invalid_cert_data",
-		serverPk:    validPk,
-		currentCert: &Certificate{},
-		certStr:     "invalid",
-		wantErrMsg:  "deserializing cert for: cert is too short",
+		name: "invalid_cert_data",
+		answer: []dns.RR{
+			&dns.TXT{Txt: []string{"invalid", "cert"}},
+		},
+		serverPk: nil,
+		wantCert: &Certificate{},
 	}, {
-		name:        "expired_cert",
-		serverPk:    validPk,
-		currentCert: &Certificate{},
-		certStr: certToString(t, newTestCert(t, validSk, validCert, &Certificate{
-			NotBefore: 1,
-			NotAfter:  2,
-		})),
-		wantErrMsg: "verifying cert: " + string(ErrInvalidDate),
+		name: "mx_answer",
+		answer: []dns.RR{
+			&dns.MX{},
+		},
+		serverPk: nil,
+		wantCert: &Certificate{},
 	}, {
-		name:        "invalid_signature",
-		serverPk:    validPk,
-		currentCert: &Certificate{},
-		certStr:     certToString(t, newTestCert(t, wrongSk, validCert, nil)),
-		wantErrMsg:  "verifying cert: " + string(ErrInvalidCertSignature),
+		name: "expired_cert",
+		answer: []dns.RR{
+			certToTXT(t, newTestCert(t, validSk, validCert, &Certificate{
+				NotBefore: 1,
+				NotAfter:  2,
+			})),
+		},
+		serverPk: validPk,
+		wantCert: &Certificate{},
 	}, {
-		name:        "wrong_public_key",
-		serverPk:    wrongPk,
-		currentCert: &Certificate{},
-		certStr:     certToString(t, newTestCert(t, validSk, validCert, nil)),
-		wantErrMsg:  "verifying cert: " + string(ErrInvalidCertSignature),
+		name: "invalid_signature",
+		answer: []dns.RR{
+			certToTXT(t, newTestCert(t, wrongSk, validCert, nil)),
+		},
+		serverPk: validPk,
+		wantCert: &Certificate{},
 	}, {
-		name:        "valid_cert",
-		serverPk:    validPk,
-		currentCert: &Certificate{},
-		certStr:     certToString(t, newTestCert(t, validSk, validCert, nil)),
+		name: "wrong_public_key",
+		answer: []dns.RR{
+			certToTXT(t, newTestCert(t, validSk, validCert, nil)),
+		},
+		serverPk: wrongPk,
+		wantCert: &Certificate{},
+	}, {
+		name: "valid_cert",
+		answer: []dns.RR{
+			certToTXT(t, newTestCert(t, validSk, validCert, nil)),
+		},
+		serverPk: validPk,
 		wantCert: newTestCert(t, validSk, validCert, &Certificate{
 			ResolverPk: validCert.ResolverPk,
 		}),
 	}, {
-		name:        "newer_serial",
-		serverPk:    validPk,
-		currentCert: validCert,
-		certStr: certToString(t, newTestCert(t, validSk, validCert, &Certificate{
-			Serial: validCert.Serial + 1,
-		})),
+		name: "higher_serial_after",
+		answer: []dns.RR{
+			certToTXT(t, newTestCert(t, validSk, validCert, nil)),
+			certToTXT(t, newTestCert(t, validSk, validCert, &Certificate{
+				Serial: validCert.Serial + 1,
+			})),
+		},
+		serverPk: validPk,
 		wantCert: newTestCert(t, validSk, validCert, &Certificate{
 			Serial: validCert.Serial + 1,
 		}),
 	}, {
-		name:        "older_serial",
-		serverPk:    validPk,
-		currentCert: &Certificate{Serial: validCert.Serial + 1},
-		certStr:     certToString(t, newTestCert(t, validSk, validCert, nil)),
+		name: "higher_serial_before",
+		answer: []dns.RR{
+			certToTXT(t, newTestCert(t, validSk, validCert, &Certificate{
+				Serial: validCert.Serial + 1,
+			})),
+			certToTXT(t, newTestCert(t, validSk, validCert, nil)),
+		},
+		serverPk: validPk,
+		wantCert: newTestCert(t, validSk, validCert, &Certificate{
+			Serial: validCert.Serial + 1,
+		}),
 	}, {
-		name:        "same_serial_lower_es",
-		serverPk:    validPk,
-		currentCert: validCert,
-		certStr: certToString(t, newTestCert(t, validSk, validCert, &Certificate{
-			ESVersion: XSalsa20Poly1305,
-		})),
-	}, {
-		name:        "same_serial_same_es",
-		serverPk:    validPk,
-		currentCert: validCert,
-		certStr:     certToString(t, newTestCert(t, validSk, validCert, nil)),
+		name: "same_serial_higher_es",
+		answer: []dns.RR{
+			certToTXT(t, newTestCert(t, validSk, validCert, &Certificate{
+				ESVersion: XSalsa20Poly1305,
+			})),
+			certToTXT(t, newTestCert(t, validSk, validCert, &Certificate{
+				ESVersion: XChacha20Poly1305,
+			})),
+		},
+		serverPk: validPk,
+		wantCert: newTestCert(t, validSk, validCert, &Certificate{
+			ESVersion: XChacha20Poly1305,
+		}),
 	}}
 
 	for _, tc := range testCases {
@@ -125,8 +148,7 @@ func TestClient_parseCert(t *testing.T) {
 			t.Parallel()
 
 			ctx := testutil.ContextWithTimeout(t, testTimeout)
-			cert, err := client.parseCert(ctx, tc.serverPk, tc.currentCert, fqdn, tc.certStr)
-			testutil.AssertErrorMsg(t, tc.wantErrMsg, err)
+			cert := client.parseAnswer(ctx, tc.answer, tc.serverPk, fqdn)
 			assert.Equal(t, tc.wantCert, cert)
 		})
 	}

@@ -307,114 +307,107 @@ func (c *Client) fetchCert(
 		return nil, ErrFailedToFetchCert
 	}
 
-	cert = &Certificate{}
-	for _, rr := range r.Answer {
-		currentCert := c.parseCertFromTXT(ctx, stamp.ServerPk, rr, cert, providerName)
-		if currentCert != nil {
-			cert = currentCert
-
-			break
-		}
-	}
-
-	if cert.Serial == 0 {
+	cert = c.parseAnswer(ctx, r.Answer, stamp.ServerPk, stamp.ProviderName)
+	if cert == nil {
 		return nil, fmt.Errorf("no valid txt records for provider %q", providerName)
 	}
 
 	return cert, nil
 }
 
-// parseCertFromTXT attempts to parse and validate a DNSCrypt certificate from
-// a TXT DNS record.  It returns the certificate if it's valid and has higher
-// priority than currentCert, or nil otherwise.  rr and currentCert must not be
-// nil.
-func (c *Client) parseCertFromTXT(
+// parseAnswer parses DNS TXT records and returns the certificate with the
+// highest priority.
+func (c *Client) parseAnswer(
 	ctx context.Context,
+	answer []dns.RR,
 	serverPk ed25519.PublicKey,
-	rr dns.RR,
-	currentCert *Certificate,
 	providerName string,
 ) (cert *Certificate) {
-	txt, ok := rr.(*dns.TXT)
-	if !ok {
-		return nil
-	}
+	cert = &Certificate{}
+	for _, rr := range answer {
+		txt, ok := rr.(*dns.TXT)
+		if !ok {
+			continue
+		}
 
-	certStr := strings.Join(txt.Txt, "")
-	cert, err := c.parseCert(ctx, serverPk, currentCert, providerName, certStr)
-	if err != nil {
-		c.logger.DebugContext(ctx, "bad cert", "provider", providerName, slogutil.KeyError, err)
+		certStr := strings.Join(txt.Txt, "")
 
-		return nil
-	} else if cert == nil {
-		return nil
+		currentCert := &Certificate{}
+		err := currentCert.UnmarshalBinary(unpackTxtString(certStr))
+		if err != nil {
+			c.logger.DebugContext(
+				ctx,
+				"faield to parse certificate",
+				"provider_name", providerName,
+				slogutil.KeyError, err,
+			)
+
+			continue
+		}
+
+		err = verifyCert(currentCert, serverPk)
+		if err != nil {
+			c.logger.DebugContext(
+				ctx,
+				"failed to verify certificate",
+				"provider_name", providerName,
+				slogutil.KeyError, err,
+			)
+
+			continue
+		}
+
+		if c.certHasHigherPriority(ctx, cert, currentCert, providerName) {
+			cert = currentCert
+		}
 	}
 
 	return cert
 }
 
-// parseCert parses a certificate from its string form and returns it if it
-// has priority over currentCert.  currentCert must not be nil.
-func (c *Client) parseCert(
+// certHasHigherPriority returns true if current has higher priority than prev.
+// A higher serial number is preferred, or a higher ESVersion if the serial
+// numbers are the same.  prev and current must not be nil.
+func (c *Client) certHasHigherPriority(
 	ctx context.Context,
-	serverPk ed25519.PublicKey,
-	currentCert *Certificate,
+	prev *Certificate,
+	current *Certificate,
 	providerName string,
-	certStr string,
-) (cert *Certificate, err error) {
-	certBytes := unpackTxtString(certStr)
-	cert = &Certificate{}
-	err = cert.UnmarshalBinary(certBytes)
-	if err != nil {
-		return nil, fmt.Errorf("deserializing cert for: %w", err)
-	}
-
-	c.logger.DebugContext(
-		ctx,
-		"fetched certificate",
-		"provider", providerName,
-		"cert_serial", cert.Serial,
-	)
-
-	err = verifyCert(cert, serverPk)
-	if err != nil {
-		return nil, fmt.Errorf("verifying cert: %w", err)
-	}
-
-	if cert.Serial < currentCert.Serial {
+) (hasHigherPriority bool) {
+	if prev.Serial > current.Serial {
 		c.logger.DebugContext(
 			ctx,
 			"cert superseded by a previous certificate",
 			"provider", providerName,
-			"cert_serial", cert.Serial,
+			"cert_serial", current.Serial,
 		)
 
-		return nil, nil
+		return false
 	}
 
-	if cert.Serial > currentCert.Serial {
-		return cert, nil
+	if prev.Serial < current.Serial {
+		return true
 	}
 
-	if cert.ESVersion <= currentCert.ESVersion {
+	if current.ESVersion <= prev.ESVersion {
 		c.logger.DebugContext(
 			ctx,
 			"keeping the current cert es version",
 			"provider", providerName,
 		)
 
-		return nil, nil
+		return false
 	}
 
 	c.logger.DebugContext(
 		ctx,
 		"upgrading the construction",
 		"provider", providerName,
-		"es_version", currentCert.ESVersion,
-		"new_es_version", cert.ESVersion,
+		"es_version", prev.ESVersion,
+		"new_es_version", current.ESVersion,
 	)
 
-	return cert, nil
+	return true
 }
 
 // verifyCert verifies the date and signature of the certificate.  cert must not

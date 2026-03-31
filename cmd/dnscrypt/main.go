@@ -1,4 +1,7 @@
-// TODO(f.setrakov):  Reimplement the old command.
 package main
 
-func main() {}
+import "github.com/AdguardTeam/dnscrypt/internal/cmd"
+
+func main() {
+	cmd.Main()
+}

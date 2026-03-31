@@ -50,9 +50,6 @@ ENV_MISC = env \
 
 # Keep the line above blank.
 
-# TODO(f.setrakov): Once the new cmd has been implemented, add the build.sh
-# file and the relevant target.
-
 # Keep this target first, so that a naked make invocation triggers a
 # check
 .PHONY: check
@@ -64,7 +61,8 @@ init: ; git config core.hooksPath ./scripts/hooks
 .PHONY: test
 test: go-test
 
-.PHONY: go-deps go-env go-lint go-test go-upd-tools
+.PHONY: go-build go-deps go-env go-lint go-test go-upd-tools
+go-build:     ; $(ENV)          "$(SHELL)" ./scripts/make/go-build.sh
 go-deps:      ; $(ENV)          "$(SHELL)" ./scripts/make/go-deps.sh
 go-env:       ; $(ENV)          "$(GO.MACRO)" env
 go-lint:      ; $(ENV)          "$(SHELL)" ./scripts/make/go-lint.sh

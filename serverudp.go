@@ -88,7 +88,7 @@ func (s *Server) ServeUDP(ctx context.Context, l *net.UDPConn) (err error) {
 	udpWg := &sync.WaitGroup{}
 	defer s.cleanUpUDP(srvWg, udpWg, l)
 
-	s.logger.InfoContext(ctx, "entering DNSCrypt UDP listening loop", "listen_addr", l.LocalAddr())
+	s.logger.InfoContext(ctx, "entering dnscrypt udp listening loop", "listen_addr", l.LocalAddr())
 
 	certTxt := s.getCertTXT()
 
@@ -96,7 +96,7 @@ func (s *Server) ServeUDP(ctx context.Context, l *net.UDPConn) (err error) {
 		var stopped bool
 		stopped, err = s.serveUDPLoop(ctx, l, udpWg, certTxt)
 		if err != nil {
-			// Don't wrap the error as it is informative enough.
+			// Don't wrap the error, because it's informative enough as is.
 			return err
 		}
 

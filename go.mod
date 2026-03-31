@@ -7,6 +7,7 @@ require (
 	github.com/ameshkov/dnsstamps v1.0.3
 	github.com/miekg/dns v1.1.65
 	github.com/stretchr/testify v1.11.1
+	go.yaml.in/yaml/v4 v4.0.0-rc.4
 	golang.org/x/crypto v0.49.0
 	golang.org/x/net v0.52.0
 )
