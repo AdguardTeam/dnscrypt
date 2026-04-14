@@ -28,7 +28,7 @@ func TestHexDecodeKey(t *testing.T) {
 func TestGenerateResolverConfig(t *testing.T) {
 	t.Parallel()
 
-	rc, err := dnscrypt.GenerateResolverConfig(testHostname, nil)
+	rc, err := dnscrypt.GenerateResolverConfig(testHostname, nil, testTTL)
 	require.NoError(t, err)
 	assert.Equal(t, dnscrypt.DNSCryptV2Prefix+testHostname, rc.ProviderName)
 	assert.Len(t, rc.ResolverSk, dnscrypt.KeySize*2)
@@ -47,7 +47,7 @@ func TestGenerateResolverConfig(t *testing.T) {
 func TestResolverConfig_CreateStamp(t *testing.T) {
 	t.Parallel()
 
-	rc, err := dnscrypt.GenerateResolverConfig(testHostname, nil)
+	rc, err := dnscrypt.GenerateResolverConfig(testHostname, nil, testTTL)
 	require.NoError(t, err)
 
 	wantPk, err := dnscrypt.HexDecodeKey(rc.PublicKey)

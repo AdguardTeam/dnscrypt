@@ -3,6 +3,7 @@ package forward
 import (
 	"context"
 	"fmt"
+	"net/netip"
 
 	"github.com/AdguardTeam/dnscrypt"
 	"github.com/miekg/dns"
@@ -15,7 +16,7 @@ type HandlerConfig struct {
 
 	// Address is the upstream address to which requests will be forwarded.  It
 	// must not be empty.
-	Address string
+	Address netip.AddrPort
 }
 
 // Handler is the [dnscrypt.Handler] implementation that forwards DNS requests
@@ -30,7 +31,7 @@ type Handler struct {
 func NewHandler(c *HandlerConfig) (h *Handler) {
 	return &Handler{
 		client: c.Client,
-		addr:   c.Address,
+		addr:   c.Address.String(),
 	}
 }
 

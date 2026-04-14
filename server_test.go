@@ -148,7 +148,7 @@ func testThisServerRespondMessages(tb testing.TB, proto dnscrypt.Proto, srv *tes
 func TestServer_ServeError(t *testing.T) {
 	t.Parallel()
 
-	rc, err := dnscrypt.GenerateResolverConfig(prefixedHostname, nil)
+	rc, err := dnscrypt.GenerateResolverConfig(prefixedHostname, nil, testTTL)
 	require.NoError(t, err)
 
 	cert, err := rc.NewCert()

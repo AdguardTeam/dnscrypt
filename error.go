@@ -37,7 +37,7 @@ const (
 	ErrInvalidPadding errors.Error = "invalid padding"
 
 	// ErrInvalidDNSStamp is returned when an invalid DNS stamp is provided.
-	ErrInvalidDNSStamp errors.Error = "invalid DNS stamp"
+	ErrInvalidDNSStamp errors.Error = "invalid stamp"
 
 	// ErrFailedToFetchCert is returned when it failed to fetch DNSCrypt
 	// certificate.

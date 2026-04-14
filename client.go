@@ -337,7 +337,7 @@ func (c *Client) parseAnswer(
 		if err != nil {
 			c.logger.DebugContext(
 				ctx,
-				"faield to parse certificate",
+				"failed to parse certificate",
 				"provider_name", providerName,
 				slogutil.KeyError, err,
 			)

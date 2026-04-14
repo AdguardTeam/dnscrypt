@@ -136,9 +136,11 @@ func (rc *ResolverConfig) CreateStamp(addr string) (stamp dnsstamps.ServerStamp,
 func GenerateResolverConfig(
 	providerName string,
 	privateKey ed25519.PrivateKey,
+	ttl time.Duration,
 ) (rc ResolverConfig, err error) {
 	rc = ResolverConfig{
-		ESVersion: XSalsa20Poly1305,
+		ESVersion:      XSalsa20Poly1305,
+		CertificateTTL: ttl,
 	}
 	if !strings.HasPrefix(providerName, DNSCryptV2Prefix) {
 		providerName = DNSCryptV2Prefix + providerName

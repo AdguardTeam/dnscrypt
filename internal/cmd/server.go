@@ -30,59 +30,6 @@ type serverOptions struct {
 	upstreamTimeout time.Duration
 }
 
-// Indexes to help with the [serverCommandLineOptions] initialization.
-const (
-	configIdx = iota
-	forwardIdx
-	listenIdx
-	upstreamTimeoutIdx
-	verboseIdx
-)
-
-// serverCommandLineOptions are all command-line options currently supported by
-// DNSCrypt.
-var serverCommandLineOptions = []*commandLineOption{
-	configIdx: {
-		defaultValue: "",
-		description:  "Path to the server configuration file.",
-		long:         "config",
-		short:        "c",
-		valueType:    "path",
-	},
-
-	forwardIdx: {
-		defaultValue: netip.MustParseAddrPort("94.140.14.140:53"),
-		description:  "Default upstream for server.",
-		long:         "forward",
-		short:        "f",
-		valueType:    "addr",
-	},
-
-	listenIdx: {
-		defaultValue: []netip.AddrPort{netip.MustParseAddrPort("0.0.0.0:443")},
-		description:  "Server listening addresses.",
-		long:         "listen",
-		short:        "l",
-		valueType:    "addr",
-	},
-
-	upstreamTimeoutIdx: {
-		defaultValue: 10 * time.Second,
-		description:  "Timeout for server to request upstream.",
-		long:         "timeout",
-		short:        "t",
-		valueType:    "",
-	},
-
-	verboseIdx: {
-		defaultValue: false,
-		description:  "Enable verbose logging.",
-		long:         "verbose",
-		short:        "v",
-		valueType:    "",
-	},
-}
-
 // type check
 var _ validate.Interface = (*serverOptions)(nil)
 
@@ -91,34 +38,63 @@ func (opts *serverOptions) Validate() (err error) {
 	return validate.NotEmpty("config", opts.confFile)
 }
 
-// parseServerOptions parses command-line options for the server action.  opts
-// must not be nil.
-func parseServerOptions(args []string, opts *options) (err error) {
-	flags := flag.NewFlagSet(actionServer, flag.ContinueOnError)
+// Indexes to help with the [serverCommandLineOptions] initialization.
+const (
+	optIdxServerConfig = iota
+	optIdxServerForward
+	optIdxServerListen
+	optIdxServerUpstreamTimeout
+)
 
-	opts.forward = serverCommandLineOptions[forwardIdx].defaultValue.(netip.AddrPort)
+// serverCommandLineOptions are all command-line options currently supported by
+// DNSCrypt server.
+var serverCommandLineOptions = []*commandLineOption{
+	optIdxServerConfig: {
+		defaultValue: "config.yaml",
+		description:  "Path to the server configuration file.",
+		long:         "config",
+		short:        "c",
+		valueType:    "path",
+	},
+
+	optIdxServerForward: {
+		defaultValue: netip.MustParseAddrPort("94.140.14.140:53"),
+		description:  "Default upstream for server.",
+		long:         "forward",
+		short:        "f",
+		valueType:    "addr",
+	},
+
+	optIdxServerListen: {
+		defaultValue: []netip.AddrPort{netip.MustParseAddrPort("0.0.0.0:443")},
+		description:  "Server listening addresses.",
+		long:         "listen",
+		short:        "l",
+		valueType:    "addr",
+	},
+
+	optIdxServerUpstreamTimeout: {
+		defaultValue: 10 * time.Second,
+		description:  "Timeout for server to request upstream.",
+		long:         "timeout",
+		short:        "t",
+		valueType:    "duration",
+	},
+}
+
+// addServerOptions adds [serverCommandLineOptions] to flags.  flags and opts
+// must not be nil.
+func addServerOptions(flags *flag.FlagSet, opts *serverOptions) {
+	opts.forward = serverCommandLineOptions[optIdxServerForward].defaultValue.(netip.AddrPort)
 
 	for idx, fieldPtr := range []any{
-		configIdx:          &opts.confFile,
-		forwardIdx:         &opts.forward,
-		listenIdx:          &opts.listenAddrs,
-		upstreamTimeoutIdx: &opts.upstreamTimeout,
-		verboseIdx:         &opts.verbose,
+		optIdxServerConfig:          &opts.confFile,
+		optIdxServerForward:         &opts.forward,
+		optIdxServerListen:          &opts.listenAddrs,
+		optIdxServerUpstreamTimeout: &opts.upstreamTimeout,
 	} {
 		addOption(flags, fieldPtr, serverCommandLineOptions[idx])
 	}
-
-	err = flags.Parse(args)
-	if err != nil {
-		// Don't wrap the error, because it's informative enough as is.
-		return err
-	}
-
-	if len(opts.listenAddrs) == 0 {
-		opts.listenAddrs = serverCommandLineOptions[listenIdx].defaultValue.([]netip.AddrPort)
-	}
-
-	return nil
 }
 
 // parseConfig parses the server configuration file.

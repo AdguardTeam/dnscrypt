@@ -20,14 +20,24 @@ import (
 func Main() {
 	ctx := context.Background()
 
-	opts, _, err := parseOptions()
+	opts, action, err := parseOptions()
 	check(ctx, osutil.ExitCodeArgumentError, err)
 
 	logger := newBaseLogger(opts)
 	ctx = slogutil.ContextWithLogger(ctx, logger)
 
-	// TODO(f.setrakov): Run other actions.
-	err = errors.Annotate(opts.Validate(), "validating options: %w")
+	shouldExit, code := processCommonOpts(action, opts)
+	if shouldExit {
+		os.Exit(code)
+	}
+
+	exit, err := runAction(ctx, action, opts)
+	check(ctx, osutil.ExitCodeFailure, err)
+	if exit {
+		os.Exit(osutil.ExitCodeSuccess)
+	}
+
+	err = errors.Annotate(opts.serverOptions.Validate(), "validating options: %w")
 	check(ctx, osutil.ExitCodeArgumentError, err)
 
 	logger.InfoContext(
@@ -50,7 +60,7 @@ func Main() {
 	check(ctx, osutil.ExitCodeFailure, errors.Annotate(err, "creating certificate"))
 
 	h := forward.NewHandler(&forward.HandlerConfig{
-		Address: opts.forward.String(),
+		Address: opts.forward,
 		Client: &dns.Client{
 			Timeout: opts.upstreamTimeout,
 		},

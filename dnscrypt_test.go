@@ -142,7 +142,7 @@ func newTestServer(
 ) (server *testServer, cert *dnscrypt.Certificate) {
 	tb.Helper()
 
-	rc, err := dnscrypt.GenerateResolverConfig(prefixedHostname, nil)
+	rc, err := dnscrypt.GenerateResolverConfig(prefixedHostname, nil, testTTL)
 	require.NoError(tb, err)
 
 	cert, err = rc.NewCert()
