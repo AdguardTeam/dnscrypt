@@ -15,15 +15,6 @@ import (
 	"go.yaml.in/yaml/v4"
 )
 
-// TODO(f.setrakov): Move to dcos.
-const (
-	// defaultWOFlags are the default flags for write-only operations.
-	defaultWOFlags int = os.O_CREATE | os.O_WRONLY | os.O_TRUNC
-
-	// defaultPerm is the default set of permissions for non-executable files
-	defaultPerm = 0o600
-)
-
 // generateOptions contains options for the generate command.
 type generateOptions struct {
 	// providerName is the DNSCrypt provider name.
@@ -43,10 +34,20 @@ type generateOptions struct {
 var _ validate.Interface = (*generateOptions)(nil)
 
 // Validate implements the [validate.Interface] interface for *generateOptions.
-//
-// TODO(f.setrakov): Consider validating key length.
 func (opts *generateOptions) Validate() (err error) {
-	return validate.NotEmpty("provider-name", opts.providerName)
+	errs := []error{
+		validate.NotNegative("ttl", opts.ttl),
+		validate.NotEmpty("provider-name", opts.providerName),
+	}
+
+	if opts.privateKey != "" {
+		errs = append(
+			errs,
+			validate.Equal("private key length", len(opts.privateKey), hexEncodedPrivateKeyLength),
+		)
+	}
+
+	return errors.Join(errs...)
 }
 
 // Indexes to help with the [generateCommandLineOptions] initialization.
@@ -85,7 +86,7 @@ var generateCommandLineOptions = []*commandLineOption{
 	},
 
 	optIdxGenerateTTL: {
-		defaultValue: time.Duration(0),
+		defaultValue: defaultCertTTL,
 		description:  "Certificate time-to-live.",
 		long:         "ttl",
 		short:        "t",
@@ -96,7 +97,7 @@ var generateCommandLineOptions = []*commandLineOption{
 // addGenerateOptions adds [generateCommandLineOptions] to flags.  flags and
 // opts must not be nil.
 func addGenerateOptions(flags *flag.FlagSet, opts *generateOptions) {
-	for idx, fieldPtr := range map[int]any{
+	for idx, fieldPtr := range []any{
 		optIdxGenerateProviderName: &opts.providerName,
 		optIdxGenerateOut:          &opts.out,
 		optIdxGeneratePrivateKey:   &opts.privateKey,
@@ -107,8 +108,8 @@ func addGenerateOptions(flags *flag.FlagSet, opts *generateOptions) {
 }
 
 // generate generates [dnscrypt.ResolverConfig] using the given options and
-// saves the result to the configured file.  opts must not be nil.  ctx must
-// contain a logger accessible with [slogutil.LoggerFromContext].
+// saves the result to the configured file.  ctx must contain a logger
+// accessible with [slogutil.LoggerFromContext].
 func generate(ctx context.Context, opts generateOptions) (err error) {
 	err = opts.Validate()
 	if err != nil {

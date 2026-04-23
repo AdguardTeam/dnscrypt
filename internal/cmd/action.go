@@ -11,9 +11,8 @@ import (
 type actionName = string
 
 // Available actions.
-//
-// TODO(f.setrakov): Add convert action.
 const (
+	actionConvert  actionName = "convert"
 	actionGenerate actionName = "generate"
 	actionLookup   actionName = "lookup"
 	actionServer   actionName = "server"
@@ -28,8 +27,6 @@ type commandLineAction struct {
 }
 
 // actions is the list of all the available actions.
-//
-// TODO(f.setrakov): Add convert action.
 var actions = []*commandLineAction{{
 	name:        actionServer,
 	description: "Start DNSCrypt server",
@@ -42,13 +39,18 @@ var actions = []*commandLineAction{{
 	name:        actionGenerate,
 	description: "Generate DNSCrypt resolver config",
 	options:     generateCommandLineOptions,
+}, {
+	name:        actionConvert,
+	description: "Convert dnscrypt-wrapper keys to DNSCrypt resolver config",
+	options:     convertCommandLineOptions,
 }}
 
 // runAction runs the given action with the given options and decides whether
 // the application should exit afterwards.  opts must not be nil.
 func runAction(ctx context.Context, action actionName, opts *options) (exit bool, err error) {
-	// TODO(f.setrakov): Add convert action.
 	switch action {
+	case actionConvert:
+		err = convert(ctx, opts.convertOptions)
 	case actionGenerate:
 		err = generate(ctx, opts.generateOptions)
 	case actionLookup:

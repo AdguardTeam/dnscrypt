@@ -35,7 +35,12 @@ var _ validate.Interface = (*serverOptions)(nil)
 
 // Validate implements the [validate.Interface] interface for *serverOptions.
 func (opts *serverOptions) Validate() (err error) {
-	return validate.NotEmpty("config", opts.confFile)
+	errs := []error{
+		validate.NotNegative("timeout", opts.upstreamTimeout),
+		validate.NotEmpty("config", opts.confFile),
+	}
+
+	return errors.Join(errs...)
 }
 
 // Indexes to help with the [serverCommandLineOptions] initialization.

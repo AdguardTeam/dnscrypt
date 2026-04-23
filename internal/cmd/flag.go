@@ -22,6 +22,7 @@ const minArgs = 1
 
 // options contain all the command-specific and common options.
 type options struct {
+	convertOptions
 	generateOptions
 	lookupOptions
 	serverOptions
@@ -114,8 +115,9 @@ func parseOptions() (opts *options, action actionName, err error) {
 	flags := flag.NewFlagSet(action, flag.ContinueOnError)
 	addCommonOptions(flags, opts)
 
-	// TODO(f.setrakov): Add convert action.
 	switch action {
+	case actionConvert:
+		addConvertOptions(flags, &opts.convertOptions)
 	case actionGenerate:
 		addGenerateOptions(flags, &opts.generateOptions)
 	case actionLookup:

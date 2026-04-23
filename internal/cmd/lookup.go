@@ -50,10 +50,21 @@ func (opts *lookupOptions) Validate() (err error) {
 	errs = append(errs, validate.NotEmpty("domain", opts.domain))
 
 	// Only validate the resolver info if the stamp is empty.
-	if opts.stamp.ProviderName == "" {
-		errs = append(errs, validate.NotEmpty("public-key", opts.publicKey))
-		errs = append(errs, validate.NotEmpty("provider-name", opts.providerName))
-		errs = append(errs, validate.NotEmpty("addr", opts.resolverAddr))
+	if opts.stamp.ProviderName != "" {
+		return errors.Join(errs...)
+	}
+
+	errs = append(errs, []error{
+		validate.NotEmpty("public-key", opts.publicKey),
+		validate.NotEmpty("provider-name", opts.providerName),
+		validate.NotEmpty("addr", opts.resolverAddr),
+	}...)
+
+	if opts.publicKey != "" {
+		errs = append(
+			errs,
+			validate.Equal("public key length", len(opts.publicKey), hexEncodedPublicKeyLength),
+		)
 	}
 
 	return errors.Join(errs...)

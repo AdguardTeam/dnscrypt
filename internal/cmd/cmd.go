@@ -3,6 +3,7 @@ package cmd
 
 import (
 	"context"
+	"crypto/ed25519"
 	"log/slog"
 	"os"
 
@@ -13,7 +14,31 @@ import (
 	"github.com/AdguardTeam/golibs/logutil/slogutil"
 	"github.com/AdguardTeam/golibs/osutil"
 	"github.com/AdguardTeam/golibs/service"
+	"github.com/AdguardTeam/golibs/timeutil"
 	"github.com/miekg/dns"
+)
+
+const (
+	// hexEncodedPrivateKeyLength is the length of a valid hex-encoded private
+	// key.
+	hexEncodedPrivateKeyLength = 2 * ed25519.PrivateKeySize
+
+	// hexEncodedPublicKeyLength is the length of a valid hex-encoded public
+	// key.
+	hexEncodedPublicKeyLength = 2 * dnscrypt.KeySize
+
+	// defaultCertTTL is the default time-to-live value for generated
+	// certificates.
+	defaultCertTTL = 365 * timeutil.Day
+)
+
+// TODO(f.setrakov): Move to dcos.
+const (
+	// defaultWOFlags are the default flags for write-only operations.
+	defaultWOFlags int = os.O_CREATE | os.O_WRONLY | os.O_TRUNC
+
+	// defaultPerm is the default set of permissions for non-executable files.
+	defaultPerm = 0o600
 )
 
 // Main is the entrypoint of DNSCrypt.
@@ -84,13 +109,23 @@ func Main() {
 	for _, t := range tcp {
 		logger.InfoContext(ctx, "running tcp listener", "addr", t.Addr())
 
-		go func() { _ = s.ServeTCP(ctx, t) }()
+		go func() {
+			tcpErr := s.ServeTCP(ctx, t)
+			if tcpErr != nil {
+				logger.ErrorContext(ctx, "tcp listening failed", slogutil.KeyError, tcpErr)
+			}
+		}()
 	}
 
 	for _, u := range udp {
 		logger.InfoContext(ctx, "running udp listener", "addr", u.LocalAddr())
 
-		go func() { _ = s.ServeUDP(ctx, u) }()
+		go func() {
+			udpErr := s.ServeUDP(ctx, u)
+			if udpErr != nil {
+				logger.ErrorContext(ctx, "udp listening failed", slogutil.KeyError, udpErr)
+			}
+		}()
 	}
 
 	serverShutdown := service.NewShutdownService(s)
