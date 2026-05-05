@@ -65,6 +65,8 @@ func (w *tcpResponseWriter) WriteMsg(ctx context.Context, m *dns.Msg) (err error
 // ServeTCP listens for TCP connections and handles them.  It blocks the calling
 // goroutine and to stop it you need to close the listener or call
 // [Server.Shutdown].  l must not be nil.  It blocks on a successful start.
+//
+// TODO(f.setrakov): Unexport when [dnscrypt.Server.Start] is implemented.
 func (s *Server) ServeTCP(ctx context.Context, l net.Listener) (err error) {
 	defer slogutil.RecoverAndLog(ctx, s.logger)
 

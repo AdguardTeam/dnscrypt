@@ -3,12 +3,6 @@
 // of the protocol.
 package dnscrypt
 
-import (
-	"fmt"
-
-	"github.com/AdguardTeam/golibs/errors"
-)
-
 const (
 	// minUDPQuestionSize is a variable length, initially set to 256 bytes,
 	// and must be a multiple of 64 bytes (see https://dnscrypt.info/protocol).
@@ -52,32 +46,3 @@ var (
 	// response.
 	resolverMagic = []byte{0x72, 0x36, 0x66, 0x6e, 0x76, 0x57, 0x6a, 0x38}
 )
-
-// Proto represents the base network protocol.
-type Proto string
-
-const (
-	// ProtoUDP represents the UDP protocol.
-	ProtoUDP Proto = "udp"
-
-	// ProtoTCP represents the TCP protocol.
-	ProtoTCP Proto = "tcp"
-)
-
-// ProtoFromString converts s into a Proto and makes sure it is valid.  This
-// should be preferred to a simple type conversion.
-func ProtoFromString(s string) (p Proto, err error) {
-	switch p = Proto(s); p {
-	case ProtoUDP:
-		return ProtoUDP, nil
-	case ProtoTCP:
-		return ProtoTCP, nil
-	default:
-		return "", fmt.Errorf(
-			"proto: %w: %q, supported: %q",
-			errors.ErrBadEnumValue,
-			s,
-			[]string{string(ProtoUDP), string(ProtoTCP)},
-		)
-	}
-}

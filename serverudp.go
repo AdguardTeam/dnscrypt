@@ -75,8 +75,10 @@ func (w *udpResponseWriter) WriteMsg(ctx context.Context, m *dns.Msg) (err error
 }
 
 // ServeUDP reads and handles UDP messages.  It blocks the calling goroutine and
-// to stop it you need to close the listener or call s[Server.Shutdown].  l must
+// to stop it you need to close the listener or call [Server.Shutdown].  l must
 // not be nil.  It blocks on a successful start.
+//
+// TODO(f.setrakov): Unexport when [dnscrypt.Server.Start] is implemented.
 func (s *Server) ServeUDP(ctx context.Context, l *net.UDPConn) (err error) {
 	defer slogutil.RecoverAndLog(ctx, s.logger)
 

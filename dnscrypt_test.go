@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"crypto/ed25519"
-	"fmt"
 	"net"
 	"net/netip"
 	"testing"
@@ -12,8 +11,6 @@ import (
 
 	"github.com/AdguardTeam/dnscrypt"
 	"github.com/AdguardTeam/golibs/logutil/slogutil"
-	"github.com/AdguardTeam/golibs/netutil"
-	"github.com/AdguardTeam/golibs/service"
 	"github.com/AdguardTeam/golibs/testutil"
 	"github.com/ameshkov/dnsstamps"
 	"github.com/miekg/dns"
@@ -87,62 +84,35 @@ func assertTestMessageResponse(tb testing.TB, reply *dns.Msg) {
 	assert.Equal(tb, net.IP(testIPv4.AsSlice()), a.A)
 }
 
-// newTestServerStamp creates a dnsstamps.ServerStamp for the given test server
-// and protocol.
-func newTestServerStamp(srv *testServer, proto dnscrypt.Proto) (stamp *dnsstamps.ServerStamp) {
-	stamp = &dnsstamps.ServerStamp{
-		ServerPk:     srv.resolverPk,
-		ProviderName: prefixedHostname,
-		Proto:        dnsstamps.StampProtoTypeDNSCrypt,
+// newTestServerStamp creates a dnsstamps.ServerStamp for the given server,
+// proto and resolver public key.
+func newTestServerStamp(
+	srv *dnscrypt.Server,
+	resolverPk ed25519.PublicKey,
+	proto dnscrypt.Proto,
+) (stamp *dnsstamps.ServerStamp) {
+	return &dnsstamps.ServerStamp{
+		ServerPk:      resolverPk,
+		ProviderName:  prefixedHostname,
+		Proto:         dnsstamps.StampProtoTypeDNSCrypt,
+		ServerAddrStr: srv.LocalAddr(proto).String(),
 	}
-
-	if proto == dnscrypt.ProtoTCP {
-		stamp.ServerAddrStr = fmt.Sprintf("%s:%d", netutil.IPv4Localhost(), srv.TCPAddr().Port)
-	} else {
-		stamp.ServerAddrStr = fmt.Sprintf("%s:%d", netutil.IPv4Localhost(), srv.UDPAddr().Port)
-	}
-
-	return stamp
-}
-
-// testServer is a DNSCrypt server for testing.
-type testServer struct {
-	tcpListen  net.Listener
-	server     *dnscrypt.Server
-	udpConn    *net.UDPConn
-	resolverPk ed25519.PublicKey
-}
-
-// TCPAddr returns the server's TCP listening address.
-func (s *testServer) TCPAddr() (addr *net.TCPAddr) {
-	return s.tcpListen.Addr().(*net.TCPAddr)
-}
-
-// UDPAddr returns the server's UDP listening address.
-func (s *testServer) UDPAddr() (addr *net.UDPAddr) {
-	return s.udpConn.LocalAddr().(*net.UDPAddr)
-}
-
-// type check
-var _ service.Shutdowner = (*testServer)(nil)
-
-// Shutdown implements the [service.Shutdowner] for *testServer.
-func (s *testServer) Shutdown(ctx context.Context) (err error) {
-	err = s.server.Shutdown(ctx)
-	_ = s.udpConn.Close()
-	_ = s.tcpListen.Close()
-
-	return err
 }
 
 // newTestServer returns properly initialized *testServer.
+//
+// TODO(f.setrakov): Use [dnscrypt.Server.Start] when implemented.  Use proto.
 func newTestServer(
 	tb testing.TB,
 	handler dnscrypt.Handler,
-) (server *testServer, cert *dnscrypt.Certificate) {
+	_ dnscrypt.Proto,
+) (server *dnscrypt.Server, resolverPk ed25519.PublicKey, cert *dnscrypt.Certificate) {
 	tb.Helper()
 
 	rc, err := dnscrypt.GenerateResolverConfig(prefixedHostname, nil, testTTL)
+	require.NoError(tb, err)
+
+	resolverPk, err = dnscrypt.HexDecodeKey(rc.PublicKey)
 	require.NoError(tb, err)
 
 	cert, err = rc.NewCert()
@@ -156,36 +126,32 @@ func newTestServer(
 	})
 	require.NoError(tb, err)
 
-	privateKey, err := dnscrypt.HexDecodeKey(rc.PrivateKey)
+	tcpListener, err := net.ListenTCP(string(dnscrypt.ProtoTCP), &net.TCPAddr{IP: net.IPv4zero})
 	require.NoError(tb, err)
 
-	publicKey := ed25519.PrivateKey(privateKey).Public().(ed25519.PublicKey)
-	srv := &testServer{
-		server:     s,
-		resolverPk: publicKey,
-	}
-
-	srv.tcpListen, err = net.ListenTCP(string(dnscrypt.ProtoTCP), &net.TCPAddr{IP: net.IPv4zero})
-	require.NoError(tb, err)
-
-	srv.udpConn, err = net.ListenUDP(string(dnscrypt.ProtoUDP), &net.UDPAddr{IP: net.IPv4zero})
+	udpConn, err := net.ListenUDP(string(dnscrypt.ProtoUDP), &net.UDPAddr{IP: net.IPv4zero})
 	require.NoError(tb, err)
 
 	ctx := testutil.ContextWithTimeout(tb, testTimeout)
 
 	go func() {
-		_ = s.ServeUDP(ctx, srv.udpConn)
+		_ = s.ServeUDP(ctx, udpConn)
 	}()
 
 	go func() {
-		_ = s.ServeTCP(ctx, srv.tcpListen)
+		_ = s.ServeTCP(ctx, tcpListener)
 	}()
 
+	require.EventuallyWithT(tb, func(c *assert.CollectT) {
+		assert.NotNil(c, s.LocalAddr(dnscrypt.ProtoTCP))
+		assert.NotNil(c, s.LocalAddr(dnscrypt.ProtoUDP))
+	}, testTimeout, testTimeout/10)
+
 	testutil.CleanupAndRequireSuccess(tb, func() (err error) {
-		return srv.Shutdown(ctx)
+		return s.Shutdown(ctx)
 	})
 
-	return srv, cert
+	return s, resolverPk, cert
 }
 
 // testHandler is the default implementation of the [dnscrypt.Handler] for

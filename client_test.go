@@ -13,61 +13,66 @@ import (
 func TestClient_DialContext(t *testing.T) {
 	t.Parallel()
 
-	srv, _ := newTestServer(t, &testHandler{})
-	stampBadProto := newTestServerStamp(srv, dnscrypt.ProtoUDP)
-	stampBadProto.Proto = dnsstamps.StampProtoTypeDoH
+	require.True(t, t.Run("tcp", func(t *testing.T) {
+		srv, resolverPk, _ := newTestServer(t, &testHandler{}, dnscrypt.ProtoTCP)
+		stamp := newTestServerStamp(srv, resolverPk, dnscrypt.ProtoTCP)
+		client := newTestClient(&dnscrypt.ClientConfig{Proto: dnscrypt.ProtoTCP})
 
-	testCases := []struct {
-		name       string
-		proto      dnscrypt.Proto
-		stampStr   string
-		wantErrMsg string
-	}{{
-		name:       "invalid_stamp",
-		proto:      dnscrypt.ProtoUDP,
-		stampStr:   "invalid_stamp_str",
-		wantErrMsg: "creating server stamp: stamps are expected to start with sdns://",
-	}, {
-		name:       "invalid_stamp_proto",
-		stampStr:   stampBadProto.String(),
-		wantErrMsg: dnscrypt.ErrInvalidDNSStamp.Error(),
-	}, {
-		name:     "tcp",
-		proto:    dnscrypt.ProtoTCP,
-		stampStr: newTestServerStamp(srv, dnscrypt.ProtoTCP).String(),
-	}, {
-		name:     "udp",
-		proto:    dnscrypt.ProtoUDP,
-		stampStr: newTestServerStamp(srv, dnscrypt.ProtoUDP).String(),
-	}}
+		ctx := testutil.ContextWithTimeout(t, testTimeout)
+		info, err := client.DialContext(ctx, stamp.String())
+		require.NoError(t, err)
+		require.NotNil(t, info)
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
+		assert.True(t, info.ResolverCert.VerifySignature(resolverPk))
+		assert.Equal(t, prefixedHostname, info.ProviderName)
+	}))
 
-			client := newTestClient(&dnscrypt.ClientConfig{Proto: tc.proto})
-			ctx := testutil.ContextWithTimeout(t, testTimeout)
-			info, err := client.DialContext(ctx, tc.stampStr)
-			testutil.AssertErrorMsg(t, tc.wantErrMsg, err)
-			if tc.wantErrMsg == "" {
-				require.NotNil(t, info)
+	require.True(t, t.Run("udp", func(t *testing.T) {
+		srv, resolverPk, _ := newTestServer(t, &testHandler{}, dnscrypt.ProtoUDP)
+		stamp := newTestServerStamp(srv, resolverPk, dnscrypt.ProtoUDP)
+		client := newTestClient(&dnscrypt.ClientConfig{Proto: dnscrypt.ProtoUDP})
 
-				assert.True(t, info.ResolverCert.VerifySignature(srv.resolverPk))
-				assert.Equal(t, prefixedHostname, info.ProviderName)
-			}
-		})
-	}
+		ctx := testutil.ContextWithTimeout(t, testTimeout)
+		info, err := client.DialContext(ctx, stamp.String())
+		require.NoError(t, err)
+		require.NotNil(t, info)
+
+		assert.True(t, info.ResolverCert.VerifySignature(resolverPk))
+		assert.Equal(t, prefixedHostname, info.ProviderName)
+	}))
+
+	require.True(t, t.Run("invalid_proto_stamp", func(t *testing.T) {
+		srv, resolverPk, _ := newTestServer(t, &testHandler{}, dnscrypt.ProtoUDP)
+		stamp := newTestServerStamp(srv, resolverPk, dnscrypt.ProtoUDP)
+		stamp.Proto = dnsstamps.StampProtoTypeDoH
+		client := newTestClient(&dnscrypt.ClientConfig{Proto: dnscrypt.ProtoUDP})
+
+		ctx := testutil.ContextWithTimeout(t, testTimeout)
+		_, err := client.DialContext(ctx, stamp.String())
+		testutil.AssertErrorMsg(t, dnscrypt.ErrInvalidDNSStamp.Error(), err)
+	}))
+
+	require.True(t, t.Run("invalid_stamp", func(t *testing.T) {
+		client := newTestClient(&dnscrypt.ClientConfig{Proto: dnscrypt.ProtoUDP})
+
+		ctx := testutil.ContextWithTimeout(t, testTimeout)
+		_, err := client.DialContext(ctx, "invalid_stamp")
+		testutil.AssertErrorMsg(
+			t,
+			`creating server stamp: stamps are expected to start with sdns://`,
+			err,
+		)
+	}))
 }
 
 func TestClient_ExchangeContext(t *testing.T) {
 	t.Parallel()
 
-	srv, _ := newTestServer(t, &testHandler{})
-
 	require.True(t, t.Run("tcp", func(t *testing.T) {
 		t.Parallel()
 
-		stamp := newTestServerStamp(srv, dnscrypt.ProtoTCP)
+		srv, resolverPk, _ := newTestServer(t, &testHandler{}, dnscrypt.ProtoTCP)
+		stamp := newTestServerStamp(srv, resolverPk, dnscrypt.ProtoTCP)
 
 		client := newTestClient(&dnscrypt.ClientConfig{Proto: dnscrypt.ProtoTCP})
 		ctx := testutil.ContextWithTimeout(t, testTimeout)
@@ -84,7 +89,8 @@ func TestClient_ExchangeContext(t *testing.T) {
 	require.True(t, t.Run("udp", func(t *testing.T) {
 		t.Parallel()
 
-		stamp := newTestServerStamp(srv, dnscrypt.ProtoUDP)
+		srv, resolverPk, _ := newTestServer(t, &testHandler{}, dnscrypt.ProtoUDP)
+		stamp := newTestServerStamp(srv, resolverPk, dnscrypt.ProtoUDP)
 
 		client := newTestClient(&dnscrypt.ClientConfig{Proto: dnscrypt.ProtoUDP})
 		ctx := testutil.ContextWithTimeout(t, testTimeout)

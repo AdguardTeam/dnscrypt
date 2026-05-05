@@ -113,6 +113,67 @@ func NewServer(conf *ServerConfig) (s *Server, err error) {
 	}, nil
 }
 
+// LocalAddr returns the local network address for the given protocol, if known.
+func (s *Server) LocalAddr(p Proto) (addr net.Addr) {
+	switch p {
+	case ProtoTCP:
+		return s.getTCPAddr()
+	case ProtoUDP:
+		return s.getUDPAddr()
+	default:
+		panic(fmt.Errorf(
+			"proto: %w: %q, supported: %q",
+			errors.ErrBadEnumValue,
+			p,
+			[]Proto{ProtoTCP, ProtoUDP},
+		))
+	}
+}
+
+// getTCPAddr returns the TCP listening address.  It panics if there are
+// multiple active TCP listeners.
+//
+// TODO(f.setrakov): Remove after [Server.Start] is implemented.
+func (s *Server) getTCPAddr() (addr net.Addr) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if len(s.tcpListeners) > 1 {
+		panic(fmt.Errorf(
+			"unexpected call to getTCPAddr: too many TCP listeners: %d",
+			len(s.tcpListeners),
+		))
+	}
+
+	for listener := range s.tcpListeners {
+		return listener.Addr()
+	}
+
+	return nil
+}
+
+// getUDPAddr returns the UDP listening address.  It panics if there are
+// multiple active UDP listeners.
+//
+// TODO(f.setrakov): Remove after [Server.Start] is implemented.
+func (s *Server) getUDPAddr() (addr net.Addr) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if len(s.udpListeners) > 1 {
+		panic(fmt.Errorf(
+			"unexpected call to getUDPAddr: too many UDP listeners: %d",
+			len(s.udpListeners),
+		))
+	}
+
+	for listener := range s.udpListeners {
+		return listener.LocalAddr()
+	}
+
+	return nil
+}
+
 // prepareShutdown prepares the server to shutdown: unblocks reads from all
 // connections related to this server, marks the server as stopped.  If the
 // server is not started, returns [ErrServerNotStarted].
@@ -158,9 +219,17 @@ func (s *Server) prepareShutdown(ctx context.Context) (srvWg *sync.WaitGroup, er
 }
 
 // type check
-var _ service.Shutdowner = (*Server)(nil)
+var _ service.Interface = (*Server)(nil)
 
-// Shutdown implements the [service.Shutdowner] for *Server.  It waits until all
+// Start implements the [service.Interface] for *Server.  It does nothing and
+// always returns nil.
+//
+// TODO(f.setrakov): Implement.
+func (s *Server) Start(_ context.Context) (err error) {
+	return nil
+}
+
+// Shutdown implements the [service.Interface] for *Server.  It waits until all
 // connections are processed and only after that it leaves the method.  If
 // context deadline is specified, it will exit earlier.
 func (s *Server) Shutdown(ctx context.Context) (err error) {

@@ -106,6 +106,7 @@ func Main() {
 	tcp, udp, err := startListeners(opts.listenAddrs, sigHdlr)
 	check(ctx, osutil.ExitCodeFailure, err)
 
+	// TODO(f.setrakov): Use [dnscrypt.Server.Start] when implemented.
 	for _, t := range tcp {
 		logger.InfoContext(ctx, "running tcp listener", "addr", t.Addr())
 

@@ -1,6 +1,7 @@
 package dnscrypt_test
 
 import (
+	"crypto/ed25519"
 	"net"
 	"testing"
 
@@ -38,9 +39,9 @@ func TestServer_TCPRespondMessages(t *testing.T) {
 func TestServer_UDPTruncateMessage(t *testing.T) {
 	t.Parallel()
 
-	srv, _ := newTestServer(t, &testLargeMsgHandler{})
+	srv, resolverPk, _ := newTestServer(t, &testLargeMsgHandler{}, dnscrypt.ProtoUDP)
 	client := newTestClient(&dnscrypt.ClientConfig{Proto: dnscrypt.ProtoUDP})
-	stamp := newTestServerStamp(srv, dnscrypt.ProtoUDP)
+	stamp := newTestServerStamp(srv, resolverPk, dnscrypt.ProtoUDP)
 	ctx := testutil.ContextWithTimeout(t, testTimeout)
 	ri, err := client.DialStampContext(ctx, *stamp)
 	require.NoError(t, err)
@@ -59,12 +60,12 @@ func TestServer_UDPTruncateMessage(t *testing.T) {
 func TestServer_UDPEDNS0_NoTruncate(t *testing.T) {
 	t.Parallel()
 
-	srv, _ := newTestServer(t, &testLargeMsgHandler{})
+	srv, resolverPk, _ := newTestServer(t, &testLargeMsgHandler{}, dnscrypt.ProtoUDP)
 	client := newTestClient(&dnscrypt.ClientConfig{
 		Proto:   dnscrypt.ProtoUDP,
 		UDPSize: 7000,
 	})
-	stamp := newTestServerStamp(srv, dnscrypt.ProtoUDP)
+	stamp := newTestServerStamp(srv, resolverPk, dnscrypt.ProtoUDP)
 	ctx := testutil.ContextWithTimeout(t, testTimeout)
 	ri, err := client.DialStampContext(ctx, *stamp)
 	require.NoError(t, err)
@@ -90,10 +91,10 @@ func TestServer_UDPEDNS0_NoTruncate(t *testing.T) {
 // testServerServeCert is a helper that checks that the server running on the
 // given protocol responds with a valid certificate.
 func testServerServeCert(tb testing.TB, proto dnscrypt.Proto) {
-	srv, cert := newTestServer(tb, &testLargeMsgHandler{})
+	srv, resolverPk, cert := newTestServer(tb, &testLargeMsgHandler{}, proto)
 	client := newTestClient(&dnscrypt.ClientConfig{Proto: proto})
 
-	stamp := newTestServerStamp(srv, proto)
+	stamp := newTestServerStamp(srv, resolverPk, proto)
 	ctx := testutil.ContextWithTimeout(tb, testTimeout)
 	ri, err := client.DialStampContext(ctx, *stamp)
 	require.NoError(tb, err)
@@ -114,17 +115,22 @@ func testServerServeCert(tb testing.TB, proto dnscrypt.Proto) {
 func testServerRespondMessages(tb testing.TB, proto dnscrypt.Proto) {
 	tb.Helper()
 
-	srv, _ := newTestServer(tb, &testHandler{})
-	testThisServerRespondMessages(tb, proto, srv)
+	srv, resolverPk, _ := newTestServer(tb, &testHandler{}, proto)
+	testThisServerRespondMessages(tb, proto, srv, resolverPk)
 }
 
 // testThisServerRespondMessages is a helper that verifies that the given server
 // responds to the default messages as expected.
-func testThisServerRespondMessages(tb testing.TB, proto dnscrypt.Proto, srv *testServer) {
+func testThisServerRespondMessages(
+	tb testing.TB,
+	proto dnscrypt.Proto,
+	srv *dnscrypt.Server,
+	resolverPk ed25519.PublicKey,
+) {
 	tb.Helper()
 
 	client := newTestClient(&dnscrypt.ClientConfig{Proto: proto})
-	stamp := newTestServerStamp(srv, proto)
+	stamp := newTestServerStamp(srv, resolverPk, proto)
 
 	ctx := testutil.ContextWithTimeout(tb, testTimeout)
 	ri, err := client.DialStampContext(ctx, *stamp)
@@ -143,91 +149,6 @@ func testThisServerRespondMessages(tb testing.TB, proto dnscrypt.Proto, srv *tes
 		require.NoError(tb, err)
 		assertTestMessageResponse(tb, res)
 	}
-}
-
-func TestServer_ServeError(t *testing.T) {
-	t.Parallel()
-
-	rc, err := dnscrypt.GenerateResolverConfig(prefixedHostname, nil, testTTL)
-	require.NoError(t, err)
-
-	cert, err := rc.NewCert()
-	require.NoError(t, err)
-
-	s, err := dnscrypt.NewServer(&dnscrypt.ServerConfig{
-		Logger:       testLogger,
-		ProviderName: rc.ProviderName,
-		ResolverCert: cert,
-	})
-	require.NoError(t, err)
-
-	srv := &testServer{
-		server: s,
-	}
-
-	dialer := net.Dialer{}
-
-	require.True(t, t.Run("closed_udp_listener", func(t *testing.T) {
-		addr := &net.UDPAddr{IP: net.IPv4zero}
-		srv.udpConn, err = net.ListenUDP(string(dnscrypt.ProtoUDP), addr)
-		require.NoError(t, err)
-
-		ctx := testutil.ContextWithTimeout(t, testTimeout)
-
-		resCh := make(chan error)
-
-		go func() {
-			pt := testutil.NewPanicT(t)
-			testutil.RequireSend(pt, resCh, s.ServeUDP(ctx, srv.udpConn), testTimeout)
-		}()
-
-		var conn net.Conn
-		conn, err = dialer.DialContext(
-			ctx,
-			string(dnscrypt.ProtoUDP),
-			srv.udpConn.LocalAddr().String(),
-		)
-		require.NoError(t, err)
-		require.NoError(t, conn.Close())
-		require.NoError(t, srv.udpConn.Close())
-
-		var ok bool
-		err, ok = testutil.RequireReceive(t, resCh, testTimeout)
-		require.True(t, ok)
-
-		assert.ErrorIs(t, err, net.ErrClosed)
-	}))
-
-	require.True(t, t.Run("closed_tcp_listener", func(t *testing.T) {
-		addr := &net.TCPAddr{IP: net.IPv4zero}
-		srv.tcpListen, err = net.ListenTCP(string(dnscrypt.ProtoTCP), addr)
-		require.NoError(t, err)
-
-		ctx := testutil.ContextWithTimeout(t, testTimeout)
-
-		resCh := make(chan error)
-
-		go func() {
-			pt := testutil.NewPanicT(t)
-			testutil.RequireSend(pt, resCh, s.ServeTCP(ctx, srv.tcpListen), testTimeout)
-		}()
-
-		var conn net.Conn
-		conn, err = dialer.DialContext(
-			ctx,
-			string(dnscrypt.ProtoTCP),
-			srv.tcpListen.Addr().String(),
-		)
-		require.NoError(t, err)
-		require.NoError(t, conn.Close())
-		require.NoError(t, srv.tcpListen.Close())
-
-		var ok bool
-		err, ok = testutil.RequireReceive(t, resCh, testTimeout)
-		require.True(t, ok)
-
-		assert.ErrorIs(t, err, net.ErrClosed)
-	}))
 }
 
 func BenchmarkServeUDP(b *testing.B) {
@@ -256,9 +177,9 @@ func BenchmarkServeTCP(b *testing.B) {
 
 // benchmarkServe is a helper that benches [testServer] with given protocol.
 func benchmarkServe(b *testing.B, proto dnscrypt.Proto) {
-	srv, _ := newTestServer(b, &testHandler{})
+	srv, resolverPk, _ := newTestServer(b, &testHandler{}, proto)
 	client := newTestClient(&dnscrypt.ClientConfig{Proto: proto})
-	stamp := newTestServerStamp(srv, proto)
+	stamp := newTestServerStamp(srv, resolverPk, proto)
 
 	ctx := testutil.ContextWithTimeout(b, testTimeout)
 	ri, err := client.DialStampContext(ctx, *stamp)
