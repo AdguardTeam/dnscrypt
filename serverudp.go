@@ -74,29 +74,25 @@ func (w *udpResponseWriter) WriteMsg(ctx context.Context, m *dns.Msg) (err error
 	return errors.Annotate(err, "writing to udp session: %w")
 }
 
-// ServeUDP reads and handles UDP messages.  It blocks the calling goroutine and
-// to stop it you need to close the listener or call [Server.Shutdown].  l must
-// not be nil.  It blocks on a successful start.
-//
-// TODO(f.setrakov): Unexport when [dnscrypt.Server.Start] is implemented.
-func (s *Server) ServeUDP(ctx context.Context, l *net.UDPConn) (err error) {
+// serveUDP reads and handles UDP messages.  It blocks the calling goroutine and
+// to stop it you need to close the listener or call [Server.Shutdown].
+func (s *Server) serveUDP(ctx context.Context) (err error) {
 	defer slogutil.RecoverAndLog(ctx, s.logger)
 
-	srvWg, err := s.prepareServeUDP(l)
+	srvWg, err := s.prepareServeUDP()
 	if err != nil {
 		return err
 	}
 
 	udpWg := &sync.WaitGroup{}
-	defer s.cleanUpUDP(srvWg, udpWg, l)
+	defer s.cleanUpUDP(srvWg, udpWg)
 
-	s.logger.InfoContext(ctx, "entering dnscrypt udp listening loop", "listen_addr", l.LocalAddr())
-
+	s.logger.InfoContext(ctx, "entering dnscrypt udp listening loop")
 	certTxt := s.getCertTXT()
 
 	for s.isStarted() {
 		var stopped bool
-		stopped, err = s.serveUDPLoop(ctx, l, udpWg, certTxt)
+		stopped, err = s.serveUDPLoop(ctx, udpWg, certTxt)
 		if err != nil {
 			// Don't wrap the error, because it's informative enough as is.
 			return err
@@ -111,15 +107,14 @@ func (s *Server) ServeUDP(ctx context.Context, l *net.UDPConn) (err error) {
 }
 
 // serveUDPLoop reads UDP messages and runs goroutines to handle them.  It also
-// handles server shutdown.  It returns true if the server has stopped.  l and
-// udpWg must not be nil.
+// handles server shutdown.  It returns true if the server has stopped.  udpWg
+// must not be nil.
 func (s *Server) serveUDPLoop(
 	ctx context.Context,
-	l *net.UDPConn,
 	udpWg *sync.WaitGroup,
 	certTxt string,
 ) (stopped bool, err error) {
-	b, sess, err := s.readUDPMsg(l)
+	b, sess, err := s.readUDPMsg()
 	if err != nil {
 		if !s.isStarted() {
 			return true, nil
@@ -148,16 +143,15 @@ func (s *Server) serveUDPLoop(
 	udpWg.Go(func() {
 		defer slogutil.RecoverAndLog(ctx, s.logger)
 
-		s.serveUDPMsg(ctx, b, certTxt, sess, l)
+		s.serveUDPMsg(ctx, b, certTxt, sess)
 	})
 
 	return false, nil
 }
 
-// prepareServeUDP prepares the server and listener for DNSCrypt service.  l
-// must not be nil.
-func (s *Server) prepareServeUDP(l *net.UDPConn) (srvWg *sync.WaitGroup, err error) {
-	err = setUDPSocketOptions(l)
+// prepareServeUDP prepares the server and listener for DNSCrypt service.
+func (s *Server) prepareServeUDP() (srvWg *sync.WaitGroup, err error) {
+	err = setUDPSocketOptions(s.udpConn)
 	if err != nil {
 		return nil, fmt.Errorf("configuring udp socket: %w", err)
 	}
@@ -165,42 +159,32 @@ func (s *Server) prepareServeUDP(l *net.UDPConn) (srvWg *sync.WaitGroup, err err
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.initOnce.Do(s.init)
-
 	srvWg = s.wg
 	srvWg.Add(1)
-
-	// NOTE: We do not check whether the server has already been started, as
-	// Serve* methods can be called multiple times.
-	s.started = true
-
-	s.udpListeners[l] = struct{}{}
 
 	return srvWg, nil
 }
 
-// cleanUpUDP waits until all UDP messages before cleaning up.  udpWg and l must
-// not be nil.
-func (s *Server) cleanUpUDP(srvWg, udpWg *sync.WaitGroup, l *net.UDPConn) {
+// cleanUpUDP waits until all UDP messages before cleaning up.  udpWg must not
+// be nil.
+func (s *Server) cleanUpUDP(srvWg, udpWg *sync.WaitGroup) {
 	udpWg.Wait()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	delete(s.udpListeners, l)
-
 	srvWg.Done()
 }
 
-// readUDPMsg reads incoming UDP message.  l must not be nil.
-func (s *Server) readUDPMsg(l *net.UDPConn) (msg []byte, sess *dns.SessionUDP, err error) {
-	err = l.SetReadDeadline(time.Now().Add(defaultReadTimeout))
+// readUDPMsg reads incoming UDP message.
+func (s *Server) readUDPMsg() (msg []byte, sess *dns.SessionUDP, err error) {
+	err = s.udpConn.SetReadDeadline(time.Now().Add(defaultReadTimeout))
 	if err != nil {
 		return nil, nil, fmt.Errorf("setting read deadline: %w", err)
 	}
 
 	msg = make([]byte, s.udpSize)
-	n, sess, err := dns.ReadFromSessionUDP(l, msg)
+	n, sess, err := dns.ReadFromSessionUDP(s.udpConn, msg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("reading from udp session: %w", err)
 	}
@@ -208,14 +192,13 @@ func (s *Server) readUDPMsg(l *net.UDPConn) (msg []byte, sess *dns.SessionUDP, e
 	return msg[:n], sess, nil
 }
 
-// serveUDPMsg handles incoming DNS message.  sess and l must not be nil.  It is
+// serveUDPMsg handles incoming DNS message.  sess must not be nil.  It is
 // intended to be used as a goroutine.
 func (s *Server) serveUDPMsg(
 	ctx context.Context,
 	b []byte,
 	certTxt string,
 	sess *dns.SessionUDP,
-	l *net.UDPConn,
 ) {
 	if !bytes.Equal(b[:clientMagicSize], s.resolverCert.ClientMagic[:]) {
 		reply, err := s.handleHandshake(b, certTxt)
@@ -229,7 +212,7 @@ func (s *Server) serveUDPMsg(
 			return
 		}
 
-		_, _ = dns.WriteToSessionUDP(l, reply, sess)
+		_, _ = dns.WriteToSessionUDP(s.udpConn, reply, sess)
 
 		return
 	}
@@ -247,7 +230,7 @@ func (s *Server) serveUDPMsg(
 	}
 
 	rw := &udpResponseWriter{
-		udpConn: l,
+		udpConn: s.udpConn,
 		sess:    sess,
 		encrypt: s.encrypt,
 		req:     m,

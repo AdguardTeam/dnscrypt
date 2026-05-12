@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -51,6 +52,15 @@ type ServerConfig struct {
 	// ProviderName is a DNSCrypt provider name.
 	ProviderName string
 
+	// Addr is the address for server to listen.  It must not be empty.
+	Addr netip.AddrPort
+
+	// Proto defines protocol for serving.  It must be one of the following:
+	//
+	//	- [ProtoTCP]
+	//	- [ProtoUDP]
+	Proto Proto
+
 	// UDPSize is the default buffer size to use to read incoming UDP messages.
 	// If not set it defaults to [defaultUDPSize].
 	UDPSize uint
@@ -61,36 +71,39 @@ var _ validate.Interface = (*ServerConfig)(nil)
 
 // Validate implements the [validate.Interface] for *ServerConfig.
 func (c *ServerConfig) Validate() (err error) {
-	errs := []error{}
-	errs = validate.Append(errs, "ResolverCert", c.ResolverCert)
-	errs = append(errs, validate.NotEmpty("ProviderName", c.ProviderName))
+	errs := []error{
+		validate.NotEmpty("ProviderName", c.ProviderName),
+		validate.NotEmpty("Addr", c.Addr),
+		validate.NotNil("ResolverCert", c.ResolverCert),
+		c.Proto.Validate(),
+	}
+
+	if c.ResolverCert != nil {
+		errs = validate.Append(errs, "ResolverCert", c.ResolverCert)
+	}
 
 	return errors.Join(errs...)
 }
 
 // Server is a DNSCrypt server implementation.
-//
-// TODO(f.setrakov): Consider implementing [service.Interface].
 type Server struct {
 	handler      Handler
 	resolverCert *Certificate
 	logger       *slog.Logger
 	// wg tracks active workers (servers).
-	wg *sync.WaitGroup
-	// tcpListeners tracks active TCP listeners.
-	tcpListeners map[net.Listener]struct{}
-	// udpListeners tracks active UDP listeners.
-	udpListeners map[*net.UDPConn]struct{}
+	wg          *sync.WaitGroup
+	udpConn     *net.UDPConn
+	tcpListener net.Listener
 	// tcpConns tracks active connections.
 	//
 	// TODO(f.setrakov): Consider using syncutil.Map.
 	tcpConns     map[net.Conn]struct{}
+	addr         netip.AddrPort
 	providerName string
+	proto        Proto
 	udpSize      uint
 	// mu protects concurrent access to listeners, conns, wg and started.
 	mu sync.RWMutex
-	// initOnce makes sure init is called only once.
-	initOnce sync.Once
 	// started indicates whether the server is processing queries.
 	started bool
 }
@@ -107,71 +120,124 @@ func NewServer(conf *ServerConfig) (s *Server, err error) {
 		handler:      cmp.Or(conf.Handler, defaultDNSCryptHandler),
 		resolverCert: conf.ResolverCert,
 		providerName: conf.ProviderName,
+		addr:         conf.Addr,
 		logger:       cmp.Or(conf.Logger, slog.Default()),
 		wg:           &sync.WaitGroup{},
 		udpSize:      cmp.Or(conf.UDPSize, defaultUDPSize),
+		proto:        conf.Proto,
+		tcpConns:     map[net.Conn]struct{}{},
 	}, nil
 }
 
 // LocalAddr returns the local network address for the given protocol, if known.
-func (s *Server) LocalAddr(p Proto) (addr net.Addr) {
-	switch p {
+func (s *Server) LocalAddr() (addr net.Addr) {
+	switch s.proto {
 	case ProtoTCP:
-		return s.getTCPAddr()
+		if s.tcpListener != nil {
+			return s.tcpListener.Addr()
+		}
 	case ProtoUDP:
-		return s.getUDPAddr()
+		if s.udpConn != nil {
+			return s.udpConn.LocalAddr()
+		}
 	default:
 		panic(fmt.Errorf(
 			"proto: %w: %q, supported: %q",
 			errors.ErrBadEnumValue,
-			p,
+			s.proto,
 			[]Proto{ProtoTCP, ProtoUDP},
 		))
 	}
-}
-
-// getTCPAddr returns the TCP listening address.  It panics if there are
-// multiple active TCP listeners.
-//
-// TODO(f.setrakov): Remove after [Server.Start] is implemented.
-func (s *Server) getTCPAddr() (addr net.Addr) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	if len(s.tcpListeners) > 1 {
-		panic(fmt.Errorf(
-			"unexpected call to getTCPAddr: too many TCP listeners: %d",
-			len(s.tcpListeners),
-		))
-	}
-
-	for listener := range s.tcpListeners {
-		return listener.Addr()
-	}
 
 	return nil
 }
 
-// getUDPAddr returns the UDP listening address.  It panics if there are
-// multiple active UDP listeners.
-//
-// TODO(f.setrakov): Remove after [Server.Start] is implemented.
-func (s *Server) getUDPAddr() (addr net.Addr) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+// type check
+var _ service.Interface = (*Server)(nil)
 
-	if len(s.udpListeners) > 1 {
+// Start implements the [service.Interface] for *Server.  It does not block
+// calling goroutine.
+func (s *Server) Start(ctx context.Context) (err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.started {
+		return ErrServerAlreadyStarted
+	}
+
+	s.started = true
+
+	switch s.proto {
+	case ProtoTCP:
+		s.tcpListener, err = net.ListenTCP(string(ProtoTCP), net.TCPAddrFromAddrPort(s.addr))
+	case ProtoUDP:
+		s.udpConn, err = net.ListenUDP(string(ProtoUDP), net.UDPAddrFromAddrPort(s.addr))
+	default:
 		panic(fmt.Errorf(
-			"unexpected call to getUDPAddr: too many UDP listeners: %d",
-			len(s.udpListeners),
+			"proto: %w: %q, supported: %q",
+			errors.ErrBadEnumValue,
+			s.proto,
+			[]Proto{ProtoTCP, ProtoUDP},
 		))
 	}
 
-	for listener := range s.udpListeners {
-		return listener.LocalAddr()
+	if err != nil {
+		s.started = false
+		s.closeListeners(ctx)
+
+		return fmt.Errorf("listening %s: %w", s.proto, err)
 	}
 
+	s.startServe(ctx)
+
 	return nil
+}
+
+// closeListeners closes server active network listeners.
+func (s *Server) closeListeners(ctx context.Context) {
+	if s.tcpListener != nil {
+		err := s.tcpListener.Close()
+		if err != nil {
+			s.logger.WarnContext(ctx, "closing tcp listener", slogutil.KeyError, err)
+		}
+	}
+
+	if s.udpConn != nil {
+		err := s.udpConn.Close()
+		if err != nil {
+			s.logger.WarnContext(ctx, "closing udp connection", slogutil.KeyError, err)
+		}
+	}
+}
+
+// startServe starts TCP and UDP connection serving loops.  It does not block
+// calling goroutine.
+func (s *Server) startServe(ctx context.Context) {
+	if s.proto == ProtoTCP {
+		go s.startServeTCP(ctx)
+	}
+
+	if s.proto == ProtoUDP {
+		go s.startServeUDP(ctx)
+	}
+}
+
+// startServeTCP starts TCP serving loop.
+func (s *Server) startServeTCP(ctx context.Context) {
+	tcpErr := s.serveTCP(ctx)
+	if tcpErr != nil {
+		// TODO(f.setrakov): Improve error handling.
+		s.logger.WarnContext(ctx, "listening tcp failed", slogutil.KeyError, tcpErr)
+	}
+}
+
+// startServeUDP starts UDP serving loop.
+func (s *Server) startServeUDP(ctx context.Context) {
+	udpErr := s.serveUDP(ctx)
+	if udpErr != nil {
+		// TODO(f.setrakov): Improve error handling.
+		s.logger.WarnContext(ctx, "listening udp failed", slogutil.KeyError, udpErr)
+	}
 }
 
 // prepareShutdown prepares the server to shutdown: unblocks reads from all
@@ -189,25 +255,10 @@ func (s *Server) prepareShutdown(ctx context.Context) (srvWg *sync.WaitGroup, er
 
 	s.started = false
 
-	// These listeners were passed to us from the outside so we cannot close
-	// them here - this is up to the calling code to do that.  Instead of that,
-	// we call Set(Read)Deadline to unblock goroutines that are currently
-	// blocked on reading from those listeners.  For tcpConns we would like to
-	// avoid closing them to be able to process queries before shutting
-	// everything down.
+	// NOTE: Avoid closing TCP connections to be able to process queries before
+	// shutting everything down.
 	for conn := range s.tcpConns {
 		_ = conn.SetReadDeadline(longTimeAgo)
-	}
-
-	for l := range s.tcpListeners {
-		switch v := l.(type) {
-		case *net.TCPListener:
-			_ = v.SetDeadline(longTimeAgo)
-		}
-	}
-
-	for l := range s.udpListeners {
-		_ = l.SetReadDeadline(longTimeAgo)
 	}
 
 	// NOTE: To prevent panics, we should not allow wait group reuse.  See
@@ -216,17 +267,6 @@ func (s *Server) prepareShutdown(ctx context.Context) (srvWg *sync.WaitGroup, er
 	s.wg = &sync.WaitGroup{}
 
 	return prevWg, nil
-}
-
-// type check
-var _ service.Interface = (*Server)(nil)
-
-// Start implements the [service.Interface] for *Server.  It does nothing and
-// always returns nil.
-//
-// TODO(f.setrakov): Implement.
-func (s *Server) Start(_ context.Context) (err error) {
-	return nil
 }
 
 // Shutdown implements the [service.Interface] for *Server.  It waits until all
@@ -239,6 +279,8 @@ func (s *Server) Shutdown(ctx context.Context) (err error) {
 	if err != nil {
 		return fmt.Errorf("preparing shutdown: %w", err)
 	}
+
+	s.closeListeners(ctx)
 
 	closed := make(chan struct{})
 	go func() {
@@ -260,18 +302,7 @@ func (s *Server) Shutdown(ctx context.Context) (err error) {
 	return errors.Annotate(err, "shutting down: %w")
 }
 
-// init initializes (lazily) Server properties on startup.  This method is
-// called from [Server.ServeTCP] and [Server.ServeUDP].
-//
-// TODO(f.setrakov): Consider moving to [NewServer].
-func (s *Server) init() {
-	s.tcpConns = map[net.Conn]struct{}{}
-	s.udpListeners = map[*net.UDPConn]struct{}{}
-	s.tcpListeners = map[net.Listener]struct{}{}
-}
-
-// isStarted returns true if the server is processing queries right now.  It
-// means that [Server.ServeTCP] and/or [Server.ServeUDP] have been called.
+// isStarted returns true if the server is processing queries right now.
 func (s *Server) isStarted() (ok bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

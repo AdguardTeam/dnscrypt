@@ -91,46 +91,23 @@ func Main() {
 		},
 	})
 
-	s, err := dnscrypt.NewServer(&dnscrypt.ServerConfig{
-		Logger:       logger,
-		ProviderName: rc.ProviderName,
-		ResolverCert: cert,
-		Handler:      h,
-	})
-	check(ctx, osutil.ExitCodeFailure, err)
-
 	sigHdlr := service.NewSignalHandler(&service.SignalHandlerConfig{
 		Logger: logger,
 	})
 
-	tcp, udp, err := startListeners(opts.listenAddrs, sigHdlr)
-	check(ctx, osutil.ExitCodeFailure, err)
-
-	// TODO(f.setrakov): Use [dnscrypt.Server.Start] when implemented.
-	for _, t := range tcp {
-		logger.InfoContext(ctx, "running tcp listener", "addr", t.Addr())
-
-		go func() {
-			tcpErr := s.ServeTCP(ctx, t)
-			if tcpErr != nil {
-				logger.ErrorContext(ctx, "tcp listening failed", slogutil.KeyError, tcpErr)
-			}
-		}()
+	baseConfig := &dnscrypt.ServerConfig{
+		Logger:       logger,
+		ProviderName: rc.ProviderName,
+		ResolverCert: cert,
+		Handler:      h,
 	}
+	for _, addr := range opts.listenAddrs {
+		err = runServerOnAddr(ctx, sigHdlr, addr, baseConfig, dnscrypt.ProtoTCP)
+		check(ctx, osutil.ExitCodeFailure, err)
 
-	for _, u := range udp {
-		logger.InfoContext(ctx, "running udp listener", "addr", u.LocalAddr())
-
-		go func() {
-			udpErr := s.ServeUDP(ctx, u)
-			if udpErr != nil {
-				logger.ErrorContext(ctx, "udp listening failed", slogutil.KeyError, udpErr)
-			}
-		}()
+		err = runServerOnAddr(ctx, sigHdlr, addr, baseConfig, dnscrypt.ProtoUDP)
+		check(ctx, osutil.ExitCodeFailure, err)
 	}
-
-	serverShutdown := service.NewShutdownService(s)
-	sigHdlr.AddService(serverShutdown)
 
 	os.Exit(sigHdlr.Handle(ctx))
 }

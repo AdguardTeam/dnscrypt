@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/AdguardTeam/golibs/errors"
+	"github.com/AdguardTeam/golibs/validate"
 )
 
 // Proto represents the base network protocol.
@@ -30,6 +31,24 @@ func ProtoFromString(s string) (p Proto, err error) {
 			"proto: %w: %q, supported: %q",
 			errors.ErrBadEnumValue,
 			s,
+			[]Proto{ProtoTCP, ProtoUDP},
+		)
+	}
+}
+
+// type check
+var _ validate.Interface = Proto("")
+
+// Validate implements the [validate.Interface] for Proto.
+func (p Proto) Validate() (err error) {
+	switch p {
+	case ProtoTCP, ProtoUDP:
+		return nil
+	default:
+		return fmt.Errorf(
+			"proto: %w: %q, supported: %q",
+			errors.ErrBadEnumValue,
+			p,
 			[]Proto{ProtoTCP, ProtoUDP},
 		)
 	}

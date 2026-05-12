@@ -57,41 +57,35 @@ func client() (err error) {
 
 ```go
 func server() (err error) {
-    // Prepare the test DNSCrypt server config.
-    rc, err := dnscrypt.GenerateResolverConfig("example.org", nil, 0)
-    if err != nil {
-        return err
-    }
+	// Prepare the test DNSCrypt server config.
+	rc, err := dnscrypt.GenerateResolverConfig("example.org", nil, 0)
+	if err != nil {
+		return err
+	}
 
-    cert, err := rc.NewCert()
-    if err != nil {
-        return err
-    }
+	cert, err := rc.NewCert()
+	if err != nil {
+		return err
+	}
 
-    s, err := dnscrypt.NewServer(&dnscrypt.ServerConfig{
-        ProviderName: rc.ProviderName,
-        ResolverCert: cert,
-    })
-    if err != nil {
-        return err
-    }
+	// Create TCP server.
+	s, err := dnscrypt.NewServer(&dnscrypt.ServerConfig{
+		ProviderName: rc.ProviderName,
+		ResolverCert: cert,
+		Addr:         netip.AddrPortFrom(netutil.IPv4Localhost(), 0),
+		Proto:        dnscrypt.ProtoTCP,
+	})
+	if err != nil {
+		return err
+	}
 
-    // Prepare a TCP listener.
-    tcpConn, err := net.ListenTCP(string(dnscrypt.ProtoTCP), &net.TCPAddr{IP: net.IPv4zero})
-    if err != nil {
-        return err
-    }
+	ctx := context.Background()
+	// Start the server.
+	err = s.Start(ctx)
+	if err != nil {
+		return err
+	}
 
-    // Prepare a UDP listener.
-    udpConn, err := net.ListenUDP(string(dnscrypt.ProtoUDP), &net.UDPAddr{IP: net.IPv4zero})
-    if err != nil {
-        return err
-    }
-
-    // Start the server.
-    go s.ServeUDP(context.Background(), udpConn)
-    go s.ServeTCP(context.Background(), tcpConn)
-
-    return nil
+	return nil
 }
 ```

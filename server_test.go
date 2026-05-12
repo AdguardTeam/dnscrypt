@@ -41,7 +41,7 @@ func TestServer_UDPTruncateMessage(t *testing.T) {
 
 	srv, resolverPk, _ := newTestServer(t, &testLargeMsgHandler{}, dnscrypt.ProtoUDP)
 	client := newTestClient(&dnscrypt.ClientConfig{Proto: dnscrypt.ProtoUDP})
-	stamp := newTestServerStamp(srv, resolverPk, dnscrypt.ProtoUDP)
+	stamp := newTestServerStamp(srv, resolverPk)
 	ctx := testutil.ContextWithTimeout(t, testTimeout)
 	ri, err := client.DialStampContext(ctx, *stamp)
 	require.NoError(t, err)
@@ -65,7 +65,7 @@ func TestServer_UDPEDNS0_NoTruncate(t *testing.T) {
 		Proto:   dnscrypt.ProtoUDP,
 		UDPSize: 7000,
 	})
-	stamp := newTestServerStamp(srv, resolverPk, dnscrypt.ProtoUDP)
+	stamp := newTestServerStamp(srv, resolverPk)
 	ctx := testutil.ContextWithTimeout(t, testTimeout)
 	ri, err := client.DialStampContext(ctx, *stamp)
 	require.NoError(t, err)
@@ -94,7 +94,7 @@ func testServerServeCert(tb testing.TB, proto dnscrypt.Proto) {
 	srv, resolverPk, cert := newTestServer(tb, &testLargeMsgHandler{}, proto)
 	client := newTestClient(&dnscrypt.ClientConfig{Proto: proto})
 
-	stamp := newTestServerStamp(srv, resolverPk, proto)
+	stamp := newTestServerStamp(srv, resolverPk)
 	ctx := testutil.ContextWithTimeout(tb, testTimeout)
 	ri, err := client.DialStampContext(ctx, *stamp)
 	require.NoError(tb, err)
@@ -130,7 +130,7 @@ func testThisServerRespondMessages(
 	tb.Helper()
 
 	client := newTestClient(&dnscrypt.ClientConfig{Proto: proto})
-	stamp := newTestServerStamp(srv, resolverPk, proto)
+	stamp := newTestServerStamp(srv, resolverPk)
 
 	ctx := testutil.ContextWithTimeout(tb, testTimeout)
 	ri, err := client.DialStampContext(ctx, *stamp)
@@ -159,7 +159,7 @@ func BenchmarkServeUDP(b *testing.B) {
 	//	goarch: arm64
 	//	pkg: github.com/AdguardTeam/dnscrypt
 	//	cpu: Apple M4 Pro
-	//	BenchmarkServeUDP-14    	    9333	    126311 ns/op	    6681 B/op	      61 allocs/op
+	//	BenchmarkServeUDP-14    	    9199	    128165 ns/op	    5993 B/op	      60 allocs/op
 	//	PASS
 	//	ok  	github.com/AdguardTeam/dnscrypt	2.052s
 }
@@ -172,14 +172,16 @@ func BenchmarkServeTCP(b *testing.B) {
 	//	goarch: arm64
 	//	pkg: github.com/AdguardTeam/dnscrypt
 	//	cpu: Apple M4 Pro
-	//	BenchmarkServeTCP-14    	   10113	    115749 ns/op	    5568 B/op	      65 allocs/op
+	//	BenchmarkServeTCP-14    	    9548	    120629 ns/op	    4864 B/op	      63 allocs/op
 }
 
 // benchmarkServe is a helper that benches [testServer] with given protocol.
+//
+// TODO(f.setrakov): Investigate the allocations increase.
 func benchmarkServe(b *testing.B, proto dnscrypt.Proto) {
 	srv, resolverPk, _ := newTestServer(b, &testHandler{}, proto)
 	client := newTestClient(&dnscrypt.ClientConfig{Proto: proto})
-	stamp := newTestServerStamp(srv, resolverPk, proto)
+	stamp := newTestServerStamp(srv, resolverPk)
 
 	ctx := testutil.ContextWithTimeout(b, testTimeout)
 	ri, err := client.DialStampContext(ctx, *stamp)
@@ -191,12 +193,15 @@ func benchmarkServe(b *testing.B, proto dnscrypt.Proto) {
 
 	var resp *dns.Msg
 
+	ctx = b.Context()
+
 	b.ReportAllocs()
 	for b.Loop() {
 		m := createTestMessage()
-
 		resp, err = client.ExchangeConnContext(ctx, conn, m, ri)
-		require.NoError(b, err)
-		assertTestMessageResponse(b, resp)
 	}
+
+	require.NoError(b, err)
+
+	assertTestMessageResponse(b, resp)
 }

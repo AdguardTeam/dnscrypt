@@ -11,7 +11,9 @@ import (
 
 	"github.com/AdguardTeam/dnscrypt"
 	"github.com/AdguardTeam/golibs/logutil/slogutil"
+	"github.com/AdguardTeam/golibs/netutil"
 	"github.com/AdguardTeam/golibs/testutil"
+	"github.com/AdguardTeam/golibs/testutil/servicetest"
 	"github.com/ameshkov/dnsstamps"
 	"github.com/miekg/dns"
 	"github.com/stretchr/testify/assert"
@@ -89,23 +91,20 @@ func assertTestMessageResponse(tb testing.TB, reply *dns.Msg) {
 func newTestServerStamp(
 	srv *dnscrypt.Server,
 	resolverPk ed25519.PublicKey,
-	proto dnscrypt.Proto,
 ) (stamp *dnsstamps.ServerStamp) {
 	return &dnsstamps.ServerStamp{
 		ServerPk:      resolverPk,
 		ProviderName:  prefixedHostname,
 		Proto:         dnsstamps.StampProtoTypeDNSCrypt,
-		ServerAddrStr: srv.LocalAddr(proto).String(),
+		ServerAddrStr: srv.LocalAddr().String(),
 	}
 }
 
 // newTestServer returns properly initialized *testServer.
-//
-// TODO(f.setrakov): Use [dnscrypt.Server.Start] when implemented.  Use proto.
 func newTestServer(
 	tb testing.TB,
 	handler dnscrypt.Handler,
-	_ dnscrypt.Proto,
+	proto dnscrypt.Proto,
 ) (server *dnscrypt.Server, resolverPk ed25519.PublicKey, cert *dnscrypt.Certificate) {
 	tb.Helper()
 
@@ -123,33 +122,11 @@ func newTestServer(
 		ProviderName: rc.ProviderName,
 		ResolverCert: cert,
 		Handler:      handler,
+		Addr:         netip.AddrPortFrom(netutil.IPv4Localhost(), 0),
+		Proto:        proto,
 	})
 	require.NoError(tb, err)
-
-	tcpListener, err := net.ListenTCP(string(dnscrypt.ProtoTCP), &net.TCPAddr{IP: net.IPv4zero})
-	require.NoError(tb, err)
-
-	udpConn, err := net.ListenUDP(string(dnscrypt.ProtoUDP), &net.UDPAddr{IP: net.IPv4zero})
-	require.NoError(tb, err)
-
-	ctx := testutil.ContextWithTimeout(tb, testTimeout)
-
-	go func() {
-		_ = s.ServeUDP(ctx, udpConn)
-	}()
-
-	go func() {
-		_ = s.ServeTCP(ctx, tcpListener)
-	}()
-
-	require.EventuallyWithT(tb, func(c *assert.CollectT) {
-		assert.NotNil(c, s.LocalAddr(dnscrypt.ProtoTCP))
-		assert.NotNil(c, s.LocalAddr(dnscrypt.ProtoUDP))
-	}, testTimeout, testTimeout/10)
-
-	testutil.CleanupAndRequireSuccess(tb, func() (err error) {
-		return s.Shutdown(ctx)
-	})
+	servicetest.RequireRun(tb, s, testTimeout)
 
 	return s, resolverPk, cert
 }

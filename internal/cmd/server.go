@@ -1,9 +1,9 @@
 package cmd
 
 import (
+	"context"
 	"flag"
 	"fmt"
-	"net"
 	"net/netip"
 	"os"
 	"time"
@@ -121,33 +121,37 @@ func parseConfig(path string) (c *dnscrypt.ResolverConfig, err error) {
 	return rc, nil
 }
 
-// startListeners starts TCP and UDP listeners on all the provided addresses.
-// sigHdlr must not be nil.  The elements of addrs must be valid.
-func startListeners(
-	addrs []netip.AddrPort,
+// runServerOnAddr initializes and starts the DNSCrypt server for the given
+// protocol on the provided address, and registers the created server in
+// sigHdlr.  All arguments must not be nil.  c must be valid.
+func runServerOnAddr(
+	ctx context.Context,
 	sigHdlr *service.SignalHandler,
-) (tcp []net.Listener, udp []*net.UDPConn, err error) {
-	for _, addr := range addrs {
-		var tcpListener net.Listener
-		tcpListener, err = net.ListenTCP("tcp", net.TCPAddrFromAddrPort(addr))
-		if err != nil {
-			return nil, nil, fmt.Errorf("listening tcp: %w", err)
-		}
-
-		tcp = append(tcp, tcpListener)
-		tcpShutdowner := service.NewCloserShutdowner(tcpListener)
-		sigHdlr.AddService(service.NewShutdownService(tcpShutdowner))
-
-		var udpConn *net.UDPConn
-		udpConn, err = net.ListenUDP("udp", net.UDPAddrFromAddrPort(addr))
-		if err != nil {
-			return nil, nil, fmt.Errorf("listening udp: %w", err)
-		}
-
-		udp = append(udp, udpConn)
-		udpShutdowner := service.NewCloserShutdowner(udpConn)
-		sigHdlr.AddService(service.NewShutdownService(udpShutdowner))
+	addr netip.AddrPort,
+	c *dnscrypt.ServerConfig,
+	proto dnscrypt.Proto,
+) (err error) {
+	var s *dnscrypt.Server
+	s, err = dnscrypt.NewServer(&dnscrypt.ServerConfig{
+		Logger:       c.Logger.With("listen_addr", addr.String()),
+		ProviderName: c.ProviderName,
+		ResolverCert: c.ResolverCert,
+		Handler:      c.Handler,
+		Addr:         addr,
+		Proto:        proto,
+	})
+	if err != nil {
+		// Don't wrap the error, because it's informative enough as is.
+		return err
 	}
 
-	return tcp, udp, nil
+	err = s.Start(ctx)
+	if err != nil {
+		// Don't wrap the error, because it's informative enough as is.
+		return err
+	}
+
+	sigHdlr.AddService(s)
+
+	return nil
 }

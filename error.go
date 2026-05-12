@@ -56,4 +56,8 @@ const (
 
 	// ErrServerNotStarted is returned if there's nothing to shutdown.
 	ErrServerNotStarted errors.Error = "server is not started"
+
+	// ErrServerAlreadyStarted is returned if [Server.Start] is being called on
+	// a server that is already started.
+	ErrServerAlreadyStarted errors.Error = "server is already started"
 )

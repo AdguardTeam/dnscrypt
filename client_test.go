@@ -15,7 +15,7 @@ func TestClient_DialContext(t *testing.T) {
 
 	require.True(t, t.Run("tcp", func(t *testing.T) {
 		srv, resolverPk, _ := newTestServer(t, &testHandler{}, dnscrypt.ProtoTCP)
-		stamp := newTestServerStamp(srv, resolverPk, dnscrypt.ProtoTCP)
+		stamp := newTestServerStamp(srv, resolverPk)
 		client := newTestClient(&dnscrypt.ClientConfig{Proto: dnscrypt.ProtoTCP})
 
 		ctx := testutil.ContextWithTimeout(t, testTimeout)
@@ -29,7 +29,7 @@ func TestClient_DialContext(t *testing.T) {
 
 	require.True(t, t.Run("udp", func(t *testing.T) {
 		srv, resolverPk, _ := newTestServer(t, &testHandler{}, dnscrypt.ProtoUDP)
-		stamp := newTestServerStamp(srv, resolverPk, dnscrypt.ProtoUDP)
+		stamp := newTestServerStamp(srv, resolverPk)
 		client := newTestClient(&dnscrypt.ClientConfig{Proto: dnscrypt.ProtoUDP})
 
 		ctx := testutil.ContextWithTimeout(t, testTimeout)
@@ -43,7 +43,7 @@ func TestClient_DialContext(t *testing.T) {
 
 	require.True(t, t.Run("invalid_proto_stamp", func(t *testing.T) {
 		srv, resolverPk, _ := newTestServer(t, &testHandler{}, dnscrypt.ProtoUDP)
-		stamp := newTestServerStamp(srv, resolverPk, dnscrypt.ProtoUDP)
+		stamp := newTestServerStamp(srv, resolverPk)
 		stamp.Proto = dnsstamps.StampProtoTypeDoH
 		client := newTestClient(&dnscrypt.ClientConfig{Proto: dnscrypt.ProtoUDP})
 
@@ -72,7 +72,7 @@ func TestClient_ExchangeContext(t *testing.T) {
 		t.Parallel()
 
 		srv, resolverPk, _ := newTestServer(t, &testHandler{}, dnscrypt.ProtoTCP)
-		stamp := newTestServerStamp(srv, resolverPk, dnscrypt.ProtoTCP)
+		stamp := newTestServerStamp(srv, resolverPk)
 
 		client := newTestClient(&dnscrypt.ClientConfig{Proto: dnscrypt.ProtoTCP})
 		ctx := testutil.ContextWithTimeout(t, testTimeout)
@@ -90,7 +90,7 @@ func TestClient_ExchangeContext(t *testing.T) {
 		t.Parallel()
 
 		srv, resolverPk, _ := newTestServer(t, &testHandler{}, dnscrypt.ProtoUDP)
-		stamp := newTestServerStamp(srv, resolverPk, dnscrypt.ProtoUDP)
+		stamp := newTestServerStamp(srv, resolverPk)
 
 		client := newTestClient(&dnscrypt.ClientConfig{Proto: dnscrypt.ProtoUDP})
 		ctx := testutil.ContextWithTimeout(t, testTimeout)

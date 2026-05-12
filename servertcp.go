@@ -62,26 +62,24 @@ func (w *tcpResponseWriter) WriteMsg(ctx context.Context, m *dns.Msg) (err error
 	return writePrefixed(res, w.tcpConn)
 }
 
-// ServeTCP listens for TCP connections and handles them.  It blocks the calling
+// serveTCP listens for TCP connections and handles them.  It blocks the calling
 // goroutine and to stop it you need to close the listener or call
-// [Server.Shutdown].  l must not be nil.  It blocks on a successful start.
-//
-// TODO(f.setrakov): Unexport when [dnscrypt.Server.Start] is implemented.
-func (s *Server) ServeTCP(ctx context.Context, l net.Listener) (err error) {
+// [Server.Shutdown].
+func (s *Server) serveTCP(ctx context.Context) (err error) {
 	defer slogutil.RecoverAndLog(ctx, s.logger)
 
-	srvWg := s.prepareServeTCP(l)
+	srvWg := s.prepareServeTCP()
 
-	s.logger.InfoContext(ctx, "entering dnscrypt tcp listening loop", "listen_addr", l.Addr())
+	s.logger.InfoContext(ctx, "entering dnscrypt tcp listening loop")
 
 	tcpWg := &sync.WaitGroup{}
-	defer s.cleanUpTCP(srvWg, tcpWg, l)
+	defer s.cleanUpTCP(srvWg, tcpWg)
 
 	certTxt := s.getCertTXT()
 
 	for s.isStarted() {
 		var stopped bool
-		stopped, err = s.serveTCPLoop(ctx, certTxt, l, tcpWg)
+		stopped, err = s.serveTCPLoop(ctx, certTxt, tcpWg)
 		if err != nil {
 			// Don't wrap the error, because it's informative enough as is.
 			return err
@@ -96,15 +94,14 @@ func (s *Server) ServeTCP(ctx context.Context, l net.Listener) (err error) {
 }
 
 // serveTCPLoop accepts TCP connections and runs goroutines to handle them. It
-// also handles server shutdown.  It returns true if the server has stopped. l
-// and tcpWg must not be nil.
+// also handles server shutdown.  It returns true if the server has stopped.
+// tcpWg must not be nil.
 func (s *Server) serveTCPLoop(
 	ctx context.Context,
 	certTxt string,
-	l net.Listener,
 	tcpWg *sync.WaitGroup,
 ) (stopped bool, err error) {
-	conn, err := l.Accept()
+	conn, err := s.tcpListener.Accept()
 	if err != nil {
 		if !s.isStarted() {
 			return true, nil
@@ -149,18 +146,10 @@ func (s *Server) serveTCPLoop(
 	return false, nil
 }
 
-// prepareServeTCP prepares the server and listener for DNSCrypt service.  l
-// must not be nil.
-func (s *Server) prepareServeTCP(l net.Listener) (prevWg *sync.WaitGroup) {
+// prepareServeTCP prepares the server and listener for DNSCrypt service.
+func (s *Server) prepareServeTCP() (prevWg *sync.WaitGroup) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	s.initOnce.Do(s.init)
-
-	// NOTE: We do not check whether the server has already been started, as
-	// Serve* methods can be called multiple times.
-	s.started = true
-	s.tcpListeners[l] = struct{}{}
 
 	srvWg := s.wg
 	srvWg.Add(1)
@@ -168,15 +157,13 @@ func (s *Server) prepareServeTCP(l net.Listener) (prevWg *sync.WaitGroup) {
 	return srvWg
 }
 
-// cleanUpTCP waits until all TCP messages before cleaning up.  tcpWg and l must
-// not be nil.
-func (s *Server) cleanUpTCP(srvWg, tcpWg *sync.WaitGroup, l net.Listener) {
+// cleanUpTCP waits until all TCP messages before cleaning up.  tcpWg must not
+// be nil.
+func (s *Server) cleanUpTCP(srvWg, tcpWg *sync.WaitGroup) {
 	tcpWg.Wait()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	delete(s.tcpListeners, l)
 
 	srvWg.Done()
 }
