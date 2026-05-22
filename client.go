@@ -323,7 +323,6 @@ func (c *Client) parseAnswer(
 	serverPk ed25519.PublicKey,
 	providerName string,
 ) (cert *Certificate) {
-	cert = &Certificate{}
 	for _, rr := range answer {
 		txt, ok := rr.(*dns.TXT)
 		if !ok {
@@ -357,7 +356,7 @@ func (c *Client) parseAnswer(
 			continue
 		}
 
-		if c.certHasHigherPriority(ctx, cert, currentCert, providerName) {
+		if cert == nil || c.certHasHigherPriority(ctx, cert, currentCert, providerName) {
 			cert = currentCert
 		}
 	}

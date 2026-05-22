@@ -83,7 +83,7 @@ func (r *encryptedResponse) decrypt(
 		var ok bool
 		packet, ok = secretbox.Open(nil, encryptedResponse, &xsalsaServerNonce, &sharedKey)
 		if !ok {
-			return nil, fmt.Errorf("decrypting response: %s: %w", r.ESVersion, err)
+			return nil, fmt.Errorf("decrypting response: %s: %w", r.ESVersion, ErrInvalidResponse)
 		}
 	default:
 		return nil, ErrESVersion

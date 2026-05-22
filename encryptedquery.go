@@ -130,7 +130,7 @@ func (q *encryptedQuery) decryptES(
 		var ok bool
 		packet, ok = secretbox.Open(nil, query, &xsalsaServerNonce, &sharedKey)
 		if !ok {
-			return nil, fmt.Errorf("decrypting query: %s: %w", q.ESVersion, err)
+			return nil, fmt.Errorf("decrypting query: %s: %w", q.ESVersion, ErrInvalidQuery)
 		}
 	default:
 		return nil, ErrESVersion

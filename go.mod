@@ -1,6 +1,6 @@
 module github.com/AdguardTeam/dnscrypt
 
-go 1.26.2
+go 1.26.3
 
 require (
 	github.com/AdguardTeam/golibs v0.35.10
