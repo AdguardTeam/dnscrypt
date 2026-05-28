@@ -40,6 +40,7 @@ trailing_newlines() (
 		-o -name '*.out' \
 		-o -name '*.test' \
 		-o -name 'dnscrypt' \
+		-o -name 'lint-output.txt' \
 		')' \
 		-print \
 		| while read -r f; do
@@ -60,6 +61,7 @@ trailing_whitespace() {
 		-o -name '*.out' \
 		-o -name '*.test' \
 		-o -name 'dnscrypt' \
+		-o -name 'lint-output.txt' \
 		')' \
 		-print \
 		| while read -r f; do
