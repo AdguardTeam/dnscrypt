@@ -57,35 +57,35 @@ func client() (err error) {
 
 ```go
 func server() (err error) {
-	// Prepare the test DNSCrypt server config.
-	rc, err := dnscrypt.GenerateResolverConfig("example.org", nil, 0)
-	if err != nil {
-		return err
-	}
+    // Prepare the test DNSCrypt server config.
+    rc, err := dnscrypt.GenerateResolverConfig("example.org", nil, 0)
+    if err != nil {
+        return err
+    }
 
-	cert, err := rc.NewCert()
-	if err != nil {
-		return err
-	}
+    cert, err := rc.NewCert()
+    if err != nil {
+        return err
+    }
 
-	// Create TCP server.
-	s, err := dnscrypt.NewServer(&dnscrypt.ServerConfig{
-		ProviderName: rc.ProviderName,
-		ResolverCert: cert,
-		Addr:         netip.AddrPortFrom(netutil.IPv4Localhost(), 0),
-		Proto:        dnscrypt.ProtoTCP,
-	})
-	if err != nil {
-		return err
-	}
+    // Create TCP server.
+    s, err := dnscrypt.NewServer(&dnscrypt.ServerConfig{
+        ProviderName: rc.ProviderName,
+        ResolverCert: cert,
+        Addr:         netip.AddrPortFrom(netutil.IPv4Localhost(), 0),
+        Proto:        dnscrypt.ProtoTCP,
+    })
+    if err != nil {
+        return err
+    }
 
-	ctx := context.Background()
-	// Start the server.
-	err = s.Start(ctx)
-	if err != nil {
-		return err
-	}
+    ctx := context.Background()
+    // Start the server.
+    err = s.Start(ctx)
+    if err != nil {
+        return err
+    }
 
-	return nil
+    return nil
 }
 ```
