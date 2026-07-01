@@ -57,6 +57,7 @@ func (r *encryptedResponse) encrypt(
 func (r *encryptedResponse) decrypt(
 	response []byte,
 	sharedKey [SharedKeySize]byte,
+	clientNonce [nonceSize]byte,
 ) (packet []byte, err error) {
 	headerLength := len(resolverMagic) + nonceSize
 	if len(response) < headerLength+xsecretbox.TagSize+minDNSPacketSize {
@@ -70,6 +71,13 @@ func (r *encryptedResponse) decrypt(
 	}
 
 	copy(r.Nonce[:], response[resolverMagicSize:nonceSize+resolverMagicSize])
+
+	// NOTE: Ensure that the client nonce received from the server matches the
+	// actual client nonce.  See AGDNS-4183.
+	if !bytes.Equal(r.Nonce[:nonceSize/2], clientNonce[:nonceSize/2]) {
+		return nil, ErrUnexpectedNonce
+	}
+
 	encryptedResponse := response[nonceSize+resolverMagicSize:]
 	switch r.ESVersion {
 	case XChacha20Poly1305:

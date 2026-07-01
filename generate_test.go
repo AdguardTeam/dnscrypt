@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/AdguardTeam/dnscrypt"
+	"github.com/AdguardTeam/dnscrypt/internal/dnscrypttest"
 	"github.com/ameshkov/dnsstamps"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -28,9 +29,9 @@ func TestHexDecodeKey(t *testing.T) {
 func TestGenerateResolverConfig(t *testing.T) {
 	t.Parallel()
 
-	rc, err := dnscrypt.GenerateResolverConfig(testHostname, nil, testTTL)
+	rc, err := dnscrypt.GenerateResolverConfig(dnscrypttest.Hostname, nil, dnscrypttest.TTL)
 	require.NoError(t, err)
-	assert.Equal(t, dnscrypt.DNSCryptV2Prefix+testHostname, rc.ProviderName)
+	assert.Equal(t, dnscrypt.DNSCryptV2Prefix+dnscrypttest.Hostname, rc.ProviderName)
 	assert.Len(t, rc.ResolverSk, dnscrypt.KeySize*2)
 	assert.Len(t, rc.PrivateKey, ed25519.PrivateKeySize*2)
 	assert.Len(t, rc.ResolverPk, dnscrypt.KeySize*2)
@@ -47,17 +48,17 @@ func TestGenerateResolverConfig(t *testing.T) {
 func TestResolverConfig_CreateStamp(t *testing.T) {
 	t.Parallel()
 
-	rc, err := dnscrypt.GenerateResolverConfig(testHostname, nil, testTTL)
+	rc, err := dnscrypt.GenerateResolverConfig(dnscrypttest.Hostname, nil, dnscrypttest.TTL)
 	require.NoError(t, err)
 
 	wantPk, err := dnscrypt.HexDecodeKey(rc.PublicKey)
 	require.NoError(t, err)
 
-	stamp, err := rc.CreateStamp(testHostname)
+	stamp, err := rc.CreateStamp(dnscrypttest.Hostname)
 	require.NoError(t, err)
 
 	assert.Equal(t, prefixedHostname, stamp.ProviderName)
 	assert.Equal(t, wantPk, stamp.ServerPk)
-	assert.Equal(t, testHostname, stamp.ServerAddrStr)
+	assert.Equal(t, dnscrypttest.Hostname, stamp.ServerAddrStr)
 	assert.Equal(t, dnsstamps.StampProtoTypeDNSCrypt, stamp.Proto)
 }

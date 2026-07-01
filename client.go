@@ -64,6 +64,7 @@ type Client struct {
 	dialer  *net.Dialer
 	proto   Proto
 	udpSize int
+	nonce   [nonceSize]byte
 }
 
 // NewClient returns properly initialized *Client.  c must be non-nil and valid.
@@ -252,7 +253,7 @@ func (c *Client) encrypt(m *dns.Msg, info *ResolverInfo) (msg []byte, err error)
 		return nil, fmt.Errorf("packing dns message: %w", err)
 	}
 
-	msg, err = q.encrypt(query, info.SharedKey)
+	msg, c.nonce, err = q.encrypt(query, info.SharedKey)
 	if err != nil {
 		return nil, fmt.Errorf("encrypting message: %w", err)
 	}
@@ -271,7 +272,7 @@ func (c *Client) decrypt(b []byte, info *ResolverInfo) (msg *dns.Msg, err error)
 		ESVersion: info.ResolverCert.ESVersion,
 	}
 
-	response, err := dr.decrypt(b, info.SharedKey)
+	response, err := dr.decrypt(b, info.SharedKey, c.nonce)
 	if err != nil {
 		return nil, fmt.Errorf("decrypting server response: %w", err)
 	}

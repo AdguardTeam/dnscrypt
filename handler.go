@@ -18,6 +18,17 @@ type Handler interface {
 	ServeDNS(ctx context.Context, rw ResponseWriter, r *dns.Msg) (err error)
 }
 
+// HandlerFunc is a function that implements the [Handler] interface.
+type HandlerFunc func(ctx context.Context, rw ResponseWriter, r *dns.Msg) (err error)
+
+// type check
+var _ Handler = HandlerFunc(nil)
+
+// ServeDNS implements the [Handler] interface for HandlerFunc.
+func (f HandlerFunc) ServeDNS(ctx context.Context, rw ResponseWriter, r *dns.Msg) (err error) {
+	return f(ctx, rw, r)
+}
+
 // ResponseWriter describes response writer for various protocols.
 type ResponseWriter interface {
 	// LocalAddr returns local socket address.

@@ -43,7 +43,7 @@ func testDNSCryptQueryEncryptDecrypt(tb testing.TB, esVersion CryptoConstruction
 	packet := make([]byte, 100)
 	_, _ = rand.Read(packet[:])
 
-	encrypted, err := q1.encrypt(packet, clientSharedKey)
+	encrypted, _, err := q1.encrypt(packet, clientSharedKey)
 	require.NoError(tb, err)
 
 	q2 := &encryptedQuery{

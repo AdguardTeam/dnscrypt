@@ -2,6 +2,7 @@ package dnscrypt
 
 import (
 	"cmp"
+	"context"
 	"crypto/ed25519"
 	"net"
 	"net/netip"
@@ -9,31 +10,22 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AdguardTeam/dnscrypt/internal/dnscrypttest"
 	"github.com/AdguardTeam/golibs/netutil"
 	"github.com/AdguardTeam/golibs/testutil"
+	"github.com/AdguardTeam/golibs/testutil/servicetest"
 	"github.com/ameshkov/dnsstamps"
 	"github.com/miekg/dns"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-const (
-	// testFQDN is the FQDN value for tests.
-	testFQDN = "example.org."
-
-	// testTimeout is a common timeout for tests.
-	testTimeout = time.Second
-
-	// testTTL is a test time-to-live value for tests.
-	testTTL = 300
-)
-
 // testTXTHdr is a common TXT DNS record header for tests.
 var testTXTHdr = dns.RR_Header{
-	Name:   testFQDN,
+	Name:   dnscrypttest.FQDN,
 	Rrtype: dns.TypeTXT,
 	Class:  dns.ClassINET,
-	Ttl:    testTTL,
+	Ttl:    uint32(dnscrypttest.TTL.Seconds()),
 }
 
 // certToTXT is a helper that returns the string representation of a certificate
@@ -48,7 +40,12 @@ func certToTXT(tb testing.TB, cert *Certificate) (txt *dns.TXT) {
 
 // newTestCertStr is a helper that creates a new certificate using the values in
 // defaultCert as defaults and signs it.
-func newTestCert(tb testing.TB, sk ed25519.PrivateKey, defaultCert, newCert *Certificate) (c *Certificate) {
+func newTestCert(
+	tb testing.TB,
+	sk ed25519.PrivateKey,
+	defaultCert *Certificate,
+	newCert *Certificate,
+) (c *Certificate) {
 	tb.Helper()
 
 	newCert = cmp.Or(newCert, defaultCert)
@@ -129,10 +126,10 @@ func TestClient_FetchCert(t *testing.T) {
 			t.Parallel()
 			addr := runTestDNSServer(t, tc.answer, dns.RcodeSuccess)
 
-			ctx := testutil.ContextWithTimeout(t, testTimeout)
+			ctx := testutil.ContextWithTimeout(t, dnscrypttest.Timeout)
 			cert, err := client.fetchCert(ctx, dnsstamps.ServerStamp{
 				ServerAddrStr: addr.String(),
-				ProviderName:  testFQDN,
+				ProviderName:  dnscrypttest.FQDN,
 				ServerPk:      tc.serverPk,
 			})
 			require.NoError(t, err)
@@ -149,7 +146,7 @@ func TestClient_FetchCert_fail(t *testing.T) {
 	_, wrongPk, wrongSk := generateValidCert(t)
 	client := NewClient(&ClientConfig{})
 
-	noRRErrMsg := `no valid txt records for provider "` + testFQDN + `"`
+	noRRErrMsg := `no valid txt records for provider "` + dnscrypttest.FQDN + `"`
 
 	testCases := []struct {
 		name       string
@@ -169,10 +166,10 @@ func TestClient_FetchCert_fail(t *testing.T) {
 		name: "mx_answer",
 		answer: []dns.RR{
 			&dns.MX{Hdr: dns.RR_Header{
-				Name:   testFQDN,
+				Name:   dnscrypttest.FQDN,
 				Rrtype: dns.TypeMX,
 				Class:  dns.ClassINET,
-				Ttl:    testTTL,
+				Ttl:    uint32(dnscrypttest.TTL.Seconds()),
 			}},
 		},
 		serverPk:   nil,
@@ -219,10 +216,10 @@ func TestClient_FetchCert_fail(t *testing.T) {
 
 			addr := runTestDNSServer(t, tc.answer, tc.rcode)
 
-			ctx := testutil.ContextWithTimeout(t, testTimeout)
+			ctx := testutil.ContextWithTimeout(t, dnscrypttest.Timeout)
 			cert, err := client.fetchCert(ctx, dnsstamps.ServerStamp{
 				ServerAddrStr: addr.String(),
-				ProviderName:  testFQDN,
+				ProviderName:  dnscrypttest.FQDN,
 				ServerPk:      tc.serverPk,
 			})
 			assert.Nil(t, cert)
@@ -266,7 +263,59 @@ func runTestDNSServer(tb testing.TB, answ []dns.RR, rcode int) (addr net.Addr) {
 	}()
 
 	testutil.CleanupAndRequireSuccess(tb, s.Shutdown)
-	testutil.RequireReceive(tb, ready, testTimeout)
+	testutil.RequireReceive(tb, ready, dnscrypttest.Timeout)
 
 	return addr
+}
+
+func TestClient_ExchangeContext_validateNonce(t *testing.T) {
+	t.Parallel()
+
+	handler := HandlerFunc(func(ctx context.Context, rw ResponseWriter, m *dns.Msg) (err error) {
+		pt := testutil.NewPanicT(t)
+		tcpRw := testutil.RequireTypeAssert[*tcpResponseWriter](pt, rw)
+		tcpRw.query.Nonce = [24]byte{}
+
+		return rw.WriteMsg(ctx, m)
+	})
+
+	rc, err := GenerateResolverConfig(dnscrypttest.Hostname, nil, 5*time.Minute)
+	require.NoError(t, err)
+
+	resolverPk, err := HexDecodeKey(rc.PublicKey)
+	require.NoError(t, err)
+
+	cert, err := rc.NewCert()
+	require.NoError(t, err)
+
+	s, err := NewServer(&ServerConfig{
+		Logger:       dnscrypttest.Logger,
+		ProviderName: rc.ProviderName,
+		ResolverCert: cert,
+		Handler:      handler,
+		Addr:         netip.AddrPortFrom(netutil.IPv4Localhost(), 0),
+		Proto:        ProtoTCP,
+	})
+	require.NoError(t, err)
+	servicetest.RequireRun(t, s, dnscrypttest.Timeout)
+
+	client := NewClient(&ClientConfig{
+		Proto: ProtoTCP,
+	})
+
+	ctx := testutil.ContextWithTimeout(t, dnscrypttest.Timeout)
+	info, err := client.DialContext(ctx, (&dnsstamps.ServerStamp{
+		ServerPk:      resolverPk,
+		ProviderName:  rc.ProviderName,
+		Proto:         dnsstamps.StampProtoTypeDNSCrypt,
+		ServerAddrStr: s.LocalAddr().String(),
+	}).String())
+	require.NoError(t, err)
+
+	msg := dnscrypttest.CreateDNSMessage()
+
+	wantErrMsg := "exchanging: decrypting response: decrypting server response: " +
+		ErrUnexpectedNonce.Error()
+	_, err = client.ExchangeContext(ctx, msg, info)
+	testutil.AssertErrorMsg(t, wantErrMsg, err)
 }

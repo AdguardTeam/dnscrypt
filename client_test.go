@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/AdguardTeam/dnscrypt"
+	"github.com/AdguardTeam/dnscrypt/internal/dnscrypttest"
 	"github.com/AdguardTeam/golibs/testutil"
 	"github.com/ameshkov/dnsstamps"
 	"github.com/stretchr/testify/assert"
@@ -13,12 +14,14 @@ import (
 func TestClient_DialContext(t *testing.T) {
 	t.Parallel()
 
+	handler := dnscrypt.HandlerFunc(testHandler)
+
 	require.True(t, t.Run("tcp", func(t *testing.T) {
-		srv, resolverPk, _ := newTestServer(t, &testHandler{}, dnscrypt.ProtoTCP)
+		srv, resolverPk, _ := newTestServer(t, handler, dnscrypt.ProtoTCP)
 		stamp := newTestServerStamp(srv, resolverPk)
 		client := newTestClient(&dnscrypt.ClientConfig{Proto: dnscrypt.ProtoTCP})
 
-		ctx := testutil.ContextWithTimeout(t, testTimeout)
+		ctx := testutil.ContextWithTimeout(t, dnscrypttest.Timeout)
 		info, err := client.DialContext(ctx, stamp.String())
 		require.NoError(t, err)
 		require.NotNil(t, info)
@@ -28,11 +31,11 @@ func TestClient_DialContext(t *testing.T) {
 	}))
 
 	require.True(t, t.Run("udp", func(t *testing.T) {
-		srv, resolverPk, _ := newTestServer(t, &testHandler{}, dnscrypt.ProtoUDP)
+		srv, resolverPk, _ := newTestServer(t, handler, dnscrypt.ProtoUDP)
 		stamp := newTestServerStamp(srv, resolverPk)
 		client := newTestClient(&dnscrypt.ClientConfig{Proto: dnscrypt.ProtoUDP})
 
-		ctx := testutil.ContextWithTimeout(t, testTimeout)
+		ctx := testutil.ContextWithTimeout(t, dnscrypttest.Timeout)
 		info, err := client.DialContext(ctx, stamp.String())
 		require.NoError(t, err)
 		require.NotNil(t, info)
@@ -42,12 +45,12 @@ func TestClient_DialContext(t *testing.T) {
 	}))
 
 	require.True(t, t.Run("invalid_proto_stamp", func(t *testing.T) {
-		srv, resolverPk, _ := newTestServer(t, &testHandler{}, dnscrypt.ProtoUDP)
+		srv, resolverPk, _ := newTestServer(t, handler, dnscrypt.ProtoUDP)
 		stamp := newTestServerStamp(srv, resolverPk)
 		stamp.Proto = dnsstamps.StampProtoTypeDoH
 		client := newTestClient(&dnscrypt.ClientConfig{Proto: dnscrypt.ProtoUDP})
 
-		ctx := testutil.ContextWithTimeout(t, testTimeout)
+		ctx := testutil.ContextWithTimeout(t, dnscrypttest.Timeout)
 		_, err := client.DialContext(ctx, stamp.String())
 		testutil.AssertErrorMsg(t, dnscrypt.ErrInvalidDNSStamp.Error(), err)
 	}))
@@ -55,7 +58,7 @@ func TestClient_DialContext(t *testing.T) {
 	require.True(t, t.Run("invalid_stamp", func(t *testing.T) {
 		client := newTestClient(&dnscrypt.ClientConfig{Proto: dnscrypt.ProtoUDP})
 
-		ctx := testutil.ContextWithTimeout(t, testTimeout)
+		ctx := testutil.ContextWithTimeout(t, dnscrypttest.Timeout)
 		_, err := client.DialContext(ctx, "invalid_stamp")
 		testutil.AssertErrorMsg(
 			t,
@@ -68,39 +71,41 @@ func TestClient_DialContext(t *testing.T) {
 func TestClient_ExchangeContext(t *testing.T) {
 	t.Parallel()
 
+	handler := dnscrypt.HandlerFunc(testHandler)
+
 	require.True(t, t.Run("tcp", func(t *testing.T) {
 		t.Parallel()
 
-		srv, resolverPk, _ := newTestServer(t, &testHandler{}, dnscrypt.ProtoTCP)
+		srv, resolverPk, _ := newTestServer(t, handler, dnscrypt.ProtoTCP)
 		stamp := newTestServerStamp(srv, resolverPk)
 
 		client := newTestClient(&dnscrypt.ClientConfig{Proto: dnscrypt.ProtoTCP})
-		ctx := testutil.ContextWithTimeout(t, testTimeout)
+		ctx := testutil.ContextWithTimeout(t, dnscrypttest.Timeout)
 		info, err := client.DialContext(ctx, stamp.String())
 		require.NoError(t, err)
 
-		req := createTestMessage()
+		req := dnscrypttest.CreateDNSMessage()
 		resp, err := client.ExchangeContext(ctx, req, info)
 		require.NoError(t, err)
 
-		assertTestMessageResponse(t, resp)
+		dnscrypttest.AssertDefaultDNSMessageResponse(t, resp)
 	}))
 
 	require.True(t, t.Run("udp", func(t *testing.T) {
 		t.Parallel()
 
-		srv, resolverPk, _ := newTestServer(t, &testHandler{}, dnscrypt.ProtoUDP)
+		srv, resolverPk, _ := newTestServer(t, handler, dnscrypt.ProtoUDP)
 		stamp := newTestServerStamp(srv, resolverPk)
 
 		client := newTestClient(&dnscrypt.ClientConfig{Proto: dnscrypt.ProtoUDP})
-		ctx := testutil.ContextWithTimeout(t, testTimeout)
+		ctx := testutil.ContextWithTimeout(t, dnscrypttest.Timeout)
 		info, err := client.DialContext(ctx, stamp.String())
 		require.NoError(t, err)
 
-		req := createTestMessage()
+		req := dnscrypttest.CreateDNSMessage()
 		resp, err := client.ExchangeContext(ctx, req, info)
 		require.NoError(t, err)
 
-		assertTestMessageResponse(t, resp)
+		dnscrypttest.AssertDefaultDNSMessageResponse(t, resp)
 	}))
 }

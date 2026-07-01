@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/AdguardTeam/dnscrypt"
+	"github.com/AdguardTeam/dnscrypt/internal/dnscrypttest"
 	"github.com/AdguardTeam/golibs/testutil"
 	"github.com/miekg/dns"
 	"github.com/stretchr/testify/assert"
@@ -39,15 +40,16 @@ func TestServer_TCPRespondMessages(t *testing.T) {
 func TestServer_UDPTruncateMessage(t *testing.T) {
 	t.Parallel()
 
-	srv, resolverPk, _ := newTestServer(t, &testLargeMsgHandler{}, dnscrypt.ProtoUDP)
+	handler := dnscrypt.HandlerFunc(testLargeMsgHandler)
+	srv, resolverPk, _ := newTestServer(t, handler, dnscrypt.ProtoUDP)
 	client := newTestClient(&dnscrypt.ClientConfig{Proto: dnscrypt.ProtoUDP})
 	stamp := newTestServerStamp(srv, resolverPk)
-	ctx := testutil.ContextWithTimeout(t, testTimeout)
+	ctx := testutil.ContextWithTimeout(t, dnscrypttest.Timeout)
 	ri, err := client.DialStampContext(ctx, *stamp)
 	require.NoError(t, err)
 	require.NotNil(t, ri)
 
-	m := createTestMessage()
+	m := dnscrypttest.CreateDNSMessage()
 	res, err := client.ExchangeContext(ctx, m, ri)
 	require.NoError(t, err)
 	require.NotNil(t, res)
@@ -60,18 +62,19 @@ func TestServer_UDPTruncateMessage(t *testing.T) {
 func TestServer_UDPEDNS0_NoTruncate(t *testing.T) {
 	t.Parallel()
 
-	srv, resolverPk, _ := newTestServer(t, &testLargeMsgHandler{}, dnscrypt.ProtoUDP)
+	handler := dnscrypt.HandlerFunc(testLargeMsgHandler)
+	srv, resolverPk, _ := newTestServer(t, handler, dnscrypt.ProtoUDP)
 	client := newTestClient(&dnscrypt.ClientConfig{
 		Proto:   dnscrypt.ProtoUDP,
 		UDPSize: 7000,
 	})
 	stamp := newTestServerStamp(srv, resolverPk)
-	ctx := testutil.ContextWithTimeout(t, testTimeout)
+	ctx := testutil.ContextWithTimeout(t, dnscrypttest.Timeout)
 	ri, err := client.DialStampContext(ctx, *stamp)
 	require.NoError(t, err)
 	require.NotNil(t, ri)
 
-	m := createTestMessage()
+	m := dnscrypttest.CreateDNSMessage()
 	m.Extra = append(m.Extra, &dns.OPT{
 		Hdr: dns.RR_Header{
 			Name:   ".",
@@ -91,11 +94,12 @@ func TestServer_UDPEDNS0_NoTruncate(t *testing.T) {
 // testServerServeCert is a helper that checks that the server running on the
 // given protocol responds with a valid certificate.
 func testServerServeCert(tb testing.TB, proto dnscrypt.Proto) {
-	srv, resolverPk, cert := newTestServer(tb, &testLargeMsgHandler{}, proto)
+	handler := dnscrypt.HandlerFunc(testLargeMsgHandler)
+	srv, resolverPk, cert := newTestServer(tb, handler, proto)
 	client := newTestClient(&dnscrypt.ClientConfig{Proto: proto})
 
 	stamp := newTestServerStamp(srv, resolverPk)
-	ctx := testutil.ContextWithTimeout(tb, testTimeout)
+	ctx := testutil.ContextWithTimeout(tb, dnscrypttest.Timeout)
 	ri, err := client.DialStampContext(ctx, *stamp)
 	require.NoError(tb, err)
 	require.NotNil(tb, ri)
@@ -115,7 +119,7 @@ func testServerServeCert(tb testing.TB, proto dnscrypt.Proto) {
 func testServerRespondMessages(tb testing.TB, proto dnscrypt.Proto) {
 	tb.Helper()
 
-	srv, resolverPk, _ := newTestServer(tb, &testHandler{}, proto)
+	srv, resolverPk, _ := newTestServer(tb, dnscrypt.HandlerFunc(testHandler), proto)
 	testThisServerRespondMessages(tb, proto, srv, resolverPk)
 }
 
@@ -132,7 +136,7 @@ func testThisServerRespondMessages(
 	client := newTestClient(&dnscrypt.ClientConfig{Proto: proto})
 	stamp := newTestServerStamp(srv, resolverPk)
 
-	ctx := testutil.ContextWithTimeout(tb, testTimeout)
+	ctx := testutil.ContextWithTimeout(tb, dnscrypttest.Timeout)
 	ri, err := client.DialStampContext(ctx, *stamp)
 	require.NoError(tb, err)
 	require.NotNil(tb, ri)
@@ -142,12 +146,12 @@ func testThisServerRespondMessages(
 	require.NoError(tb, err)
 
 	for range 10 {
-		m := createTestMessage()
+		m := dnscrypttest.CreateDNSMessage()
 
 		var res *dns.Msg
 		res, err = client.ExchangeConnContext(ctx, conn, m, ri)
 		require.NoError(tb, err)
-		assertTestMessageResponse(tb, res)
+		dnscrypttest.AssertDefaultDNSMessageResponse(tb, res)
 	}
 }
 
@@ -179,11 +183,11 @@ func BenchmarkServeTCP(b *testing.B) {
 //
 // TODO(f.setrakov): Investigate the allocations increase.
 func benchmarkServe(b *testing.B, proto dnscrypt.Proto) {
-	srv, resolverPk, _ := newTestServer(b, &testHandler{}, proto)
+	srv, resolverPk, _ := newTestServer(b, dnscrypt.HandlerFunc(testHandler), proto)
 	client := newTestClient(&dnscrypt.ClientConfig{Proto: proto})
 	stamp := newTestServerStamp(srv, resolverPk)
 
-	ctx := testutil.ContextWithTimeout(b, testTimeout)
+	ctx := testutil.ContextWithTimeout(b, dnscrypttest.Timeout)
 	ri, err := client.DialStampContext(ctx, *stamp)
 	require.NoError(b, err)
 	require.NotNil(b, ri)
@@ -197,11 +201,11 @@ func benchmarkServe(b *testing.B, proto dnscrypt.Proto) {
 
 	b.ReportAllocs()
 	for b.Loop() {
-		m := createTestMessage()
+		m := dnscrypttest.CreateDNSMessage()
 		resp, err = client.ExchangeConnContext(ctx, conn, m, ri)
 	}
 
 	require.NoError(b, err)
 
-	assertTestMessageResponse(b, resp)
+	dnscrypttest.AssertDefaultDNSMessageResponse(b, resp)
 }

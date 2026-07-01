@@ -42,7 +42,7 @@ type encryptedQuery struct {
 func (q *encryptedQuery) encrypt(
 	packet []byte,
 	sharedKey [SharedKeySize]byte,
-) (query []byte, err error) {
+) (query []byte, clientNonce [nonceSize]byte, err error) {
 	binary.BigEndian.PutUint64(q.Nonce[:8], uint64(time.Now().UnixNano()))
 	_, _ = rand.Read(q.Nonce[8:12])
 
@@ -61,10 +61,10 @@ func (q *encryptedQuery) encrypt(
 		copy(xsalsaNonce[:], nonce[:])
 		query = secretbox.Seal(query, padded, &xsalsaNonce, &sharedKey)
 	default:
-		return nil, ErrESVersion
+		return nil, [nonceSize]byte{}, ErrESVersion
 	}
 
-	return query, nil
+	return query, nonce, nil
 }
 
 // decrypt decrypts the client query, returns decrypted DNS packet.

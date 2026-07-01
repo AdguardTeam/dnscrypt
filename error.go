@@ -60,4 +60,8 @@ const (
 	// ErrServerAlreadyStarted is returned if [Server.Start] is being called on
 	// a server that is already started.
 	ErrServerAlreadyStarted errors.Error = "server is already started"
+
+	// ErrUnexpectedNonce is returned when the server's nonce does not match the
+	// actual client's nonce.
+	ErrUnexpectedNonce errors.Error = "unexpected nonce"
 )
