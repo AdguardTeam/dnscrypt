@@ -84,7 +84,7 @@ func TestClient_ExchangeContext(t *testing.T) {
 		info, err := client.DialContext(ctx, stamp.String())
 		require.NoError(t, err)
 
-		req := dnscrypttest.CreateDNSMessage()
+		req := dnscrypttest.NewDNSMessage()
 		resp, err := client.ExchangeContext(ctx, req, info)
 		require.NoError(t, err)
 
@@ -102,7 +102,7 @@ func TestClient_ExchangeContext(t *testing.T) {
 		info, err := client.DialContext(ctx, stamp.String())
 		require.NoError(t, err)
 
-		req := dnscrypttest.CreateDNSMessage()
+		req := dnscrypttest.NewDNSMessage()
 		resp, err := client.ExchangeContext(ctx, req, info)
 		require.NoError(t, err)
 

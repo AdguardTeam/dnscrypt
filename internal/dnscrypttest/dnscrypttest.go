@@ -16,7 +16,7 @@ const (
 	TTL = 5 * time.Minute
 
 	// Hostname is a common hostname for tests.
-	Hostname = "example.org"
+	Hostname = "test.example"
 
 	// FQDN is a common FQDN value for tests.  It is FQDN for [Hostname].
 	FQDN = Hostname + "."

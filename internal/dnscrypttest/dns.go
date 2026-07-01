@@ -10,19 +10,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// CreateDNSMessage is a helper that returns DNS message with default
-// parameters.
-func CreateDNSMessage() (msg *dns.Msg) {
-	req := dns.Msg{}
-	req.Id = dns.Id()
-	req.RecursionDesired = true
-	req.Question = []dns.Question{{
-		Name:   FQDN,
-		Qtype:  dns.TypeA,
-		Qclass: dns.ClassINET,
-	}}
-
-	return &req
+// NewDNSMessage is a helper that returns DNS message with default parameters.
+func NewDNSMessage() (msg *dns.Msg) {
+	return &dns.Msg{
+		MsgHdr: dns.MsgHdr{
+			Id:               dns.Id(),
+			RecursionDesired: true,
+		},
+		Question: []dns.Question{{
+			Name:   FQDN,
+			Qtype:  dns.TypeA,
+			Qclass: dns.ClassINET,
+		}},
+	}
 }
 
 // AssertDefaultDNSMessageResponse is a helper that verifies that the reply

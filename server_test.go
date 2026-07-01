@@ -49,7 +49,7 @@ func TestServer_UDPTruncateMessage(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, ri)
 
-	m := dnscrypttest.CreateDNSMessage()
+	m := dnscrypttest.NewDNSMessage()
 	res, err := client.ExchangeContext(ctx, m, ri)
 	require.NoError(t, err)
 	require.NotNil(t, res)
@@ -74,7 +74,7 @@ func TestServer_UDPEDNS0_NoTruncate(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, ri)
 
-	m := dnscrypttest.CreateDNSMessage()
+	m := dnscrypttest.NewDNSMessage()
 	m.Extra = append(m.Extra, &dns.OPT{
 		Hdr: dns.RR_Header{
 			Name:   ".",
@@ -146,7 +146,7 @@ func testThisServerRespondMessages(
 	require.NoError(tb, err)
 
 	for range 10 {
-		m := dnscrypttest.CreateDNSMessage()
+		m := dnscrypttest.NewDNSMessage()
 
 		var res *dns.Msg
 		res, err = client.ExchangeConnContext(ctx, conn, m, ri)
@@ -201,7 +201,7 @@ func benchmarkServe(b *testing.B, proto dnscrypt.Proto) {
 
 	b.ReportAllocs()
 	for b.Loop() {
-		m := dnscrypttest.CreateDNSMessage()
+		m := dnscrypttest.NewDNSMessage()
 		resp, err = client.ExchangeConnContext(ctx, conn, m, ri)
 	}
 

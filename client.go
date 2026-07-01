@@ -64,7 +64,6 @@ type Client struct {
 	dialer  *net.Dialer
 	proto   Proto
 	udpSize int
-	nonce   [nonceSize]byte
 }
 
 // NewClient returns properly initialized *Client.  c must be non-nil and valid.
@@ -163,7 +162,7 @@ func (c *Client) ExchangeConnContext(
 	m *dns.Msg,
 	info *ResolverInfo,
 ) (resp *dns.Msg, err error) {
-	query, err := c.encrypt(m, info)
+	query, clientNonce, err := c.encrypt(m, info)
 	if err != nil {
 		return nil, fmt.Errorf("encrypting: %w", err)
 	}
@@ -178,7 +177,7 @@ func (c *Client) ExchangeConnContext(
 		return nil, fmt.Errorf("reading response: %w", err)
 	}
 
-	resp, err = c.decrypt(b, info)
+	resp, err = c.decrypt(b, clientNonce, info)
 	if err != nil {
 		return nil, fmt.Errorf("decrypting response: %w", err)
 	}
@@ -242,7 +241,10 @@ func (c *Client) readResponse(ctx context.Context, conn net.Conn) (resp []byte, 
 
 // encrypt encrypts a DNS message using shared key from the resolver info.  m
 // and info must not be nil.
-func (c *Client) encrypt(m *dns.Msg, info *ResolverInfo) (msg []byte, err error) {
+func (c *Client) encrypt(
+	m *dns.Msg,
+	info *ResolverInfo,
+) (msg []byte, nonce [nonceSize]byte, err error) {
 	q := &encryptedQuery{
 		ESVersion:   info.ResolverCert.ESVersion,
 		ClientMagic: info.ResolverCert.ClientMagic,
@@ -250,29 +252,33 @@ func (c *Client) encrypt(m *dns.Msg, info *ResolverInfo) (msg []byte, err error)
 	}
 	query, err := m.Pack()
 	if err != nil {
-		return nil, fmt.Errorf("packing dns message: %w", err)
+		return nil, [nonceSize]byte{}, fmt.Errorf("packing dns message: %w", err)
 	}
 
-	msg, c.nonce, err = q.encrypt(query, info.SharedKey)
+	msg, nonce, err = q.encrypt(query, info.SharedKey)
 	if err != nil {
-		return nil, fmt.Errorf("encrypting message: %w", err)
+		return nil, [nonceSize]byte{}, fmt.Errorf("encrypting message: %w", err)
 	}
 
 	if len(msg) > c.maxQuerySize() {
-		return nil, ErrQueryTooLarge
+		return nil, [nonceSize]byte{}, ErrQueryTooLarge
 	}
 
-	return msg, nil
+	return msg, nonce, nil
 }
 
 // decrypt decrypts a DNS message using a shared key from the resolver info.
 // info must not be nil.
-func (c *Client) decrypt(b []byte, info *ResolverInfo) (msg *dns.Msg, err error) {
+func (c *Client) decrypt(
+	b []byte,
+	clientNonce [nonceSize]byte,
+	info *ResolverInfo,
+) (msg *dns.Msg, err error) {
 	dr := &encryptedResponse{
 		ESVersion: info.ResolverCert.ESVersion,
 	}
 
-	response, err := dr.decrypt(b, info.SharedKey, c.nonce)
+	response, err := dr.decrypt(b, info.SharedKey, clientNonce)
 	if err != nil {
 		return nil, fmt.Errorf("decrypting server response: %w", err)
 	}

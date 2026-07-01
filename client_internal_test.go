@@ -8,7 +8,6 @@ import (
 	"net/netip"
 	"slices"
 	"testing"
-	"time"
 
 	"github.com/AdguardTeam/dnscrypt/internal/dnscrypttest"
 	"github.com/AdguardTeam/golibs/netutil"
@@ -268,6 +267,7 @@ func runTestDNSServer(tb testing.TB, answ []dns.RR, rcode int) (addr net.Addr) {
 	return addr
 }
 
+// TODO(f.setrakov): Consider moving to external tests.
 func TestClient_ExchangeContext_validateNonce(t *testing.T) {
 	t.Parallel()
 
@@ -279,7 +279,7 @@ func TestClient_ExchangeContext_validateNonce(t *testing.T) {
 		return rw.WriteMsg(ctx, m)
 	})
 
-	rc, err := GenerateResolverConfig(dnscrypttest.Hostname, nil, 5*time.Minute)
+	rc, err := GenerateResolverConfig(dnscrypttest.Hostname, nil, dnscrypttest.TTL)
 	require.NoError(t, err)
 
 	resolverPk, err := HexDecodeKey(rc.PublicKey)
@@ -312,7 +312,7 @@ func TestClient_ExchangeContext_validateNonce(t *testing.T) {
 	}).String())
 	require.NoError(t, err)
 
-	msg := dnscrypttest.CreateDNSMessage()
+	msg := dnscrypttest.NewDNSMessage()
 
 	wantErrMsg := "exchanging: decrypting response: decrypting server response: " +
 		ErrUnexpectedNonce.Error()
