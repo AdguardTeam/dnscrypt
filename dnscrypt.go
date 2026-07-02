@@ -46,3 +46,6 @@ var (
 	// response.
 	resolverMagic = []byte{0x72, 0x36, 0x66, 0x6e, 0x76, 0x57, 0x6a, 0x38}
 )
+
+// nonce is a convenient alias for nonce values.
+type nonce = [nonceSize]byte

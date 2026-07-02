@@ -34,7 +34,7 @@ type encryptedQuery struct {
 	// random bytes, so that when a response is received, the client can use
 	// this timestamp to immediately discard responses to queries that have been
 	// sent too long ago, or dated in the future.
-	Nonce [nonceSize]byte
+	Nonce nonce
 }
 
 // encrypt encrypts the specified DNS query, returns encrypted data ready to be
@@ -42,7 +42,7 @@ type encryptedQuery struct {
 func (q *encryptedQuery) encrypt(
 	packet []byte,
 	sharedKey [SharedKeySize]byte,
-) (query []byte, clientNonce [nonceSize]byte, err error) {
+) (query []byte, clientNonce nonce, err error) {
 	binary.BigEndian.PutUint64(q.Nonce[:8], uint64(time.Now().UnixNano()))
 	_, _ = rand.Read(q.Nonce[8:12])
 
@@ -52,19 +52,19 @@ func (q *encryptedQuery) encrypt(
 
 	padded := pad(packet)
 
-	nonce := q.Nonce
+	clientNonce = q.Nonce
 	switch q.ESVersion {
 	case XChacha20Poly1305:
-		query = xsecretbox.Seal(query, nonce[:], padded, sharedKey[:])
+		query = xsecretbox.Seal(query, clientNonce[:], padded, sharedKey[:])
 	case XSalsa20Poly1305:
-		var xsalsaNonce [nonceSize]byte
-		copy(xsalsaNonce[:], nonce[:])
+		var xsalsaNonce nonce
+		copy(xsalsaNonce[:], clientNonce[:])
 		query = secretbox.Seal(query, padded, &xsalsaNonce, &sharedKey)
 	default:
-		return nil, [nonceSize]byte{}, ErrESVersion
+		return nil, nonce{}, ErrESVersion
 	}
 
-	return query, nonce, nil
+	return query, clientNonce, nil
 }
 
 // decrypt decrypts the client query, returns decrypted DNS packet.
@@ -125,7 +125,7 @@ func (q *encryptedQuery) decryptES(
 			return nil, fmt.Errorf("decrypting query: %s: %w", q.ESVersion, err)
 		}
 	case XSalsa20Poly1305:
-		var xsalsaServerNonce [24]byte
+		var xsalsaServerNonce nonce
 		copy(xsalsaServerNonce[:], q.Nonce[:])
 		var ok bool
 		packet, ok = secretbox.Open(nil, query, &xsalsaServerNonce, &sharedKey)

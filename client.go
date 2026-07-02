@@ -244,7 +244,7 @@ func (c *Client) readResponse(ctx context.Context, conn net.Conn) (resp []byte, 
 func (c *Client) encrypt(
 	m *dns.Msg,
 	info *ResolverInfo,
-) (msg []byte, nonce [nonceSize]byte, err error) {
+) (msg []byte, clientNonce nonce, err error) {
 	q := &encryptedQuery{
 		ESVersion:   info.ResolverCert.ESVersion,
 		ClientMagic: info.ResolverCert.ClientMagic,
@@ -252,26 +252,26 @@ func (c *Client) encrypt(
 	}
 	query, err := m.Pack()
 	if err != nil {
-		return nil, [nonceSize]byte{}, fmt.Errorf("packing dns message: %w", err)
+		return nil, nonce{}, fmt.Errorf("packing dns message: %w", err)
 	}
 
-	msg, nonce, err = q.encrypt(query, info.SharedKey)
+	msg, clientNonce, err = q.encrypt(query, info.SharedKey)
 	if err != nil {
-		return nil, [nonceSize]byte{}, fmt.Errorf("encrypting message: %w", err)
+		return nil, nonce{}, fmt.Errorf("encrypting message: %w", err)
 	}
 
 	if len(msg) > c.maxQuerySize() {
-		return nil, [nonceSize]byte{}, ErrQueryTooLarge
+		return nil, nonce{}, ErrQueryTooLarge
 	}
 
-	return msg, nonce, nil
+	return msg, clientNonce, nil
 }
 
 // decrypt decrypts a DNS message using a shared key from the resolver info.
 // info must not be nil.
 func (c *Client) decrypt(
 	b []byte,
-	clientNonce [nonceSize]byte,
+	clientNonce nonce,
 	info *ResolverInfo,
 ) (msg *dns.Msg, err error) {
 	dr := &encryptedResponse{

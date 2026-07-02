@@ -22,7 +22,7 @@ type encryptedResponse struct {
 
 	// Nonce - <nonce> ::= <client-nonce> <resolver-nonce>
 	// <client-nonce> ::= the nonce sent by the client in the related query.
-	Nonce [nonceSize]byte
+	Nonce nonce
 }
 
 // encrypt encrypts the server response.  r.ESVersion and r.Nonce must be set.
@@ -38,13 +38,13 @@ func (r *encryptedResponse) encrypt(
 
 	padded := pad(packet)
 
-	nonce := r.Nonce
+	serverNonce := r.Nonce
 	switch r.ESVersion {
 	case XChacha20Poly1305:
-		response = xsecretbox.Seal(response, nonce[:], padded, sharedKey[:])
+		response = xsecretbox.Seal(response, serverNonce[:], padded, sharedKey[:])
 	case XSalsa20Poly1305:
-		var xsalsaNonce [nonceSize]byte
-		copy(xsalsaNonce[:], nonce[:])
+		var xsalsaNonce nonce
+		copy(xsalsaNonce[:], serverNonce[:])
 		response = secretbox.Seal(response, padded, &xsalsaNonce, &sharedKey)
 	default:
 		return nil, ErrESVersion
@@ -57,7 +57,7 @@ func (r *encryptedResponse) encrypt(
 func (r *encryptedResponse) decrypt(
 	response []byte,
 	sharedKey [SharedKeySize]byte,
-	clientNonce [nonceSize]byte,
+	clientNonce nonce,
 ) (packet []byte, err error) {
 	headerLength := len(resolverMagic) + nonceSize
 	if len(response) < headerLength+xsecretbox.TagSize+minDNSPacketSize {
@@ -86,7 +86,7 @@ func (r *encryptedResponse) decrypt(
 			return nil, fmt.Errorf("decrypting response: %s: %w", r.ESVersion, err)
 		}
 	case XSalsa20Poly1305:
-		var xsalsaServerNonce [24]byte
+		var xsalsaServerNonce nonce
 		copy(xsalsaServerNonce[:], r.Nonce[:])
 		var ok bool
 		packet, ok = secretbox.Open(nil, encryptedResponse, &xsalsaServerNonce, &sharedKey)

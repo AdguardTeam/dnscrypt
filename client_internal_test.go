@@ -274,7 +274,7 @@ func TestClient_ExchangeContext_validateNonce(t *testing.T) {
 	handler := HandlerFunc(func(ctx context.Context, rw ResponseWriter, m *dns.Msg) (err error) {
 		pt := testutil.NewPanicT(t)
 		tcpRw := testutil.RequireTypeAssert[*tcpResponseWriter](pt, rw)
-		tcpRw.query.Nonce = [24]byte{}
+		tcpRw.query.Nonce = nonce{}
 
 		return rw.WriteMsg(ctx, m)
 	})
