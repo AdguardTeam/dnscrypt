@@ -59,9 +59,10 @@ var _ validate.Interface = (*ResolverConfig)(nil)
 // Validate implements the [validate.Interface] for *ResolverConfig.
 func (rc *ResolverConfig) Validate() (err error) {
 	var errs []error
-	errs = append(errs, validate.NotEmpty("public_key", rc.PublicKey))
-	errs = append(errs, validate.NotEmpty("private_key", rc.PrivateKey))
-	errs = append(errs, validate.NotEmpty("resolver_secret", rc.ResolverSk))
+	errs = append(errs, validate.Equal("public_key_len", len(rc.PublicKey), ed25519.PublicKeySize*2))
+	errs = append(errs, validate.Equal("private_key_len", len(rc.PrivateKey), ed25519.PrivateKeySize*2))
+	// TODO(m.kazantsev):  Consider removing this validation.
+	errs = append(errs, validate.Equal("resolver_secret_len", len(rc.ResolverSk), KeySize*2))
 
 	return errors.Join(errs...)
 }
