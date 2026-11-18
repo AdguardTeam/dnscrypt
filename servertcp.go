@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/AdguardTeam/golibs/errors"
-
 	"github.com/AdguardTeam/golibs/logutil/slogutil"
 	"github.com/miekg/dns"
 )
@@ -78,6 +77,11 @@ func (s *Server) serveTCP(ctx context.Context) (err error) {
 	certTxt := s.getCertTXT()
 
 	for s.isStarted() {
+		err = ctx.Err()
+		if err != nil {
+			return fmt.Errorf("serving tcp: %w", err)
+		}
+
 		var stopped bool
 		stopped, err = s.serveTCPLoop(ctx, certTxt, tcpWg)
 		if err != nil {
@@ -103,47 +107,42 @@ func (s *Server) serveTCPLoop(
 ) (stopped bool, err error) {
 	conn, err := s.tcpListener.Accept()
 	if err != nil {
-		if !s.isStarted() {
-			return true, nil
-		}
+		return s.handleConnectionAcceptError(ctx, err, s.proto)
+	}
 
-		var netErr net.Error
-		if errors.As(err, &netErr) && netErr.Timeout() {
-			return false, nil
-		}
+	err = s.sema.Acquire(ctx)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "failed to acquire semaphore", slogutil.KeyError, err)
 
-		if isConnClosed(err) {
-			s.logger.InfoContext(ctx, "TCP listener closed, exiting loop")
-		} else {
-			s.logger.InfoContext(
-				ctx,
-				"got error when reading from TCP listener",
-				slogutil.KeyError, err,
-			)
-		}
-
-		return true, fmt.Errorf("reading tcp message: %w", err)
+		return false, errors.Annotate(conn.Close(), "closing tcp connection: %w")
 	}
 
 	// Track the connection to allow unblocking reads on shutdown.
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
 	s.tcpConns[conn] = struct{}{}
 
 	tcpWg.Go(func() {
+		defer s.cleanupTCPConn(conn)
+
 		defer slogutil.RecoverAndLog(ctx, s.logger)
 
 		_ = s.handleTCPConnection(ctx, conn, certTxt)
-		_ = conn.Close()
-
-		s.mu.Lock()
-		defer s.mu.Unlock()
-
-		delete(s.tcpConns, conn)
 	})
 
 	return false, nil
+}
+
+// cleanupTCPConn closes connection, removes it from [Server.tcpConns] and
+// releases semaphore.  conn must not be nil.
+func (s *Server) cleanupTCPConn(conn net.Conn) {
+	s.sema.Release()
+	_ = conn.Close()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	delete(s.tcpConns, conn)
 }
 
 // prepareServeTCP prepares the server and listener for DNSCrypt service.

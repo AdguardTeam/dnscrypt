@@ -289,10 +289,10 @@ func TestClient_ExchangeContext_validateNonce(t *testing.T) {
 	require.NoError(t, err)
 
 	s, err := NewServer(&ServerConfig{
+		Handler:      handler,
 		Logger:       dnscrypttest.Logger,
 		ProviderName: rc.ProviderName,
 		ResolverCert: cert,
-		Handler:      handler,
 		Addr:         netip.AddrPortFrom(netutil.IPv4Localhost(), 0),
 		Proto:        ProtoTCP,
 	})

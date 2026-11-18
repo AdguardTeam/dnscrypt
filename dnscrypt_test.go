@@ -64,10 +64,10 @@ func newTestServer(
 	require.NoError(tb, err)
 
 	s, err := dnscrypt.NewServer(&dnscrypt.ServerConfig{
+		Handler:      handler,
 		Logger:       dnscrypttest.Logger,
 		ProviderName: rc.ProviderName,
 		ResolverCert: cert,
-		Handler:      handler,
 		Addr:         netip.AddrPortFrom(netutil.IPv4Localhost(), 0),
 		Proto:        proto,
 	})

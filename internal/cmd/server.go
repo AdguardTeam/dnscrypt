@@ -133,12 +133,15 @@ func runServerOnAddr(
 ) (err error) {
 	var s *dnscrypt.Server
 	s, err = dnscrypt.NewServer(&dnscrypt.ServerConfig{
-		Logger:       c.Logger.With("listen_addr", addr.String()),
-		ProviderName: c.ProviderName,
-		ResolverCert: c.ResolverCert,
 		Handler:      c.Handler,
-		Addr:         addr,
-		Proto:        proto,
+		ListenConfig: c.ListenConfig,
+		// TODO(f.setrakov): Consider making this value configurable.
+		MaxGoroutines: 0,
+		Logger:        c.Logger.With("listen_addr", addr.String()),
+		ProviderName:  c.ProviderName,
+		ResolverCert:  c.ResolverCert,
+		Addr:          addr,
+		Proto:         proto,
 	})
 	if err != nil {
 		// Don't wrap the error, because it's informative enough as is.

@@ -13,6 +13,7 @@ import (
 	"github.com/AdguardTeam/golibs/errors"
 	"github.com/AdguardTeam/golibs/logutil/slogutil"
 	"github.com/ameshkov/dnsstamps"
+	"github.com/c2h5oh/datasize"
 	"github.com/miekg/dns"
 )
 
@@ -55,7 +56,7 @@ type ClientConfig struct {
 
 	// UDPSize is the maximum size of a DNS response (or query) this client
 	// can send or receive.  If not set, we use [dns.MinMsgSize] by default.
-	UDPSize int
+	UDPSize datasize.ByteSize
 }
 
 // Client is a DNSCrypt resolver client.
@@ -63,7 +64,7 @@ type Client struct {
 	logger  *slog.Logger
 	dialer  *net.Dialer
 	proto   Proto
-	udpSize int
+	udpSize datasize.ByteSize
 }
 
 // NewClient returns properly initialized *Client.  c must be non-nil and valid.
@@ -260,7 +261,7 @@ func (c *Client) encrypt(
 		return nil, nonce{}, fmt.Errorf("encrypting message: %w", err)
 	}
 
-	if len(msg) > c.maxQuerySize() {
+	if datasize.ByteSize(len(msg)) > c.maxQuerySize() {
 		return nil, nonce{}, ErrQueryTooLarge
 	}
 
@@ -434,7 +435,7 @@ func verifyCert(cert *Certificate, serverPk ed25519.PublicKey) (err error) {
 }
 
 // maxQuerySize returns the maximum query size for the client.
-func (c *Client) maxQuerySize() (size int) {
+func (c *Client) maxQuerySize() (size datasize.ByteSize) {
 	if c.proto == ProtoTCP {
 		return dns.MaxMsgSize
 	}

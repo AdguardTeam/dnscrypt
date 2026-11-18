@@ -70,10 +70,10 @@ func server() (err error) {
 
     // Create TCP server.
     s, err := dnscrypt.NewServer(&dnscrypt.ServerConfig{
-        ProviderName: rc.ProviderName,
-        ResolverCert: cert,
-        Addr:         netip.AddrPortFrom(netutil.IPv4Localhost(), 0),
-        Proto:        dnscrypt.ProtoTCP,
+        ProviderName:  rc.ProviderName,
+        ResolverCert:  cert,
+        Addr:          netip.AddrPortFrom(netutil.IPv4Localhost(), 0),
+        Proto:         dnscrypt.ProtoTCP,
     })
     if err != nil {
         return err

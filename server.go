@@ -13,8 +13,11 @@ import (
 
 	"github.com/AdguardTeam/golibs/errors"
 	"github.com/AdguardTeam/golibs/logutil/slogutil"
+	"github.com/AdguardTeam/golibs/netutil"
 	"github.com/AdguardTeam/golibs/service"
+	"github.com/AdguardTeam/golibs/syncutil"
 	"github.com/AdguardTeam/golibs/validate"
+	"github.com/c2h5oh/datasize"
 	"github.com/miekg/dns"
 )
 
@@ -31,7 +34,7 @@ const defaultTCPIdleTimeout = 8 * time.Second
 // smaller seems to break things for some people.
 //
 // See also: https://github.com/AdguardTeam/AdGuardDNS/issues/188.
-const defaultUDPSize = 1252
+const defaultUDPSize datasize.ByteSize = 1252
 
 // longTimeAgo is a helper variable that is used in several SetReadDeadline
 // calls.
@@ -39,8 +42,14 @@ var longTimeAgo = time.Unix(1, 0)
 
 // ServerConfig is the configuration structure for [Server].
 type ServerConfig struct {
-	// Handler to invoke.  If nil, the [DefaultHandler] is used.
+	// Handler to invoke.  If nil, the default handler is used.
 	Handler Handler
+
+	// ListenConfig is used to create listeners and packet connections for
+	// server binding.  If not set, [netutil.NewListenConfigWithOOB] will be
+	// used if it is supported in current environment, or
+	// [netutil.NewListenConfig] otherwise.
+	ListenConfig netutil.ListenConfig
 
 	// ResolverCert contains resolver certificate.  It must not be nil.
 	ResolverCert *Certificate
@@ -63,7 +72,13 @@ type ServerConfig struct {
 
 	// UDPSize is the default buffer size to use to read incoming UDP messages.
 	// If not set it defaults to [defaultUDPSize].
-	UDPSize uint
+	UDPSize datasize.ByteSize
+
+	// MaxGoroutines is the maximum number of goroutines processing requests.
+	// If it is zero, number of goroutines is not limited.
+	//
+	// TODO(f.setrakov): Consider using uint64.
+	MaxGoroutines uint
 }
 
 // type check
@@ -90,10 +105,14 @@ type Server struct {
 	handler      Handler
 	resolverCert *Certificate
 	logger       *slog.Logger
-	// wg tracks active workers (servers).
-	wg          *sync.WaitGroup
-	udpConn     *net.UDPConn
+	// wg is used to track number of active workers.  It must not be nil.
+	wg   *sync.WaitGroup
+	sema syncutil.Semaphore
+
+	udpConn     net.PacketConn
 	tcpListener net.Listener
+	lc          netutil.ListenConfig
+
 	// tcpConns tracks active connections.
 	//
 	// TODO(f.setrakov): Consider using syncutil.Map.
@@ -101,36 +120,75 @@ type Server struct {
 	addr         netip.AddrPort
 	providerName string
 	proto        Proto
-	udpSize      uint
+	udpSize      datasize.ByteSize
 	// mu protects concurrent access to listeners, conns, wg and started.
 	mu sync.RWMutex
 	// started indicates whether the server is processing queries.
 	started bool
 }
 
-// NewServer returns properly initialized *Server.  conf must be non-nil and
-// valid.
-func NewServer(conf *ServerConfig) (s *Server, err error) {
-	err = conf.Validate()
+// NewServer returns properly initialized *Server.  c must be non-nil and valid.
+func NewServer(c *ServerConfig) (s *Server, err error) {
+	err = c.Validate()
 	if err != nil {
 		return nil, fmt.Errorf("validating config: %w", err)
 	}
 
+	var sema syncutil.Semaphore
+	if c.MaxGoroutines > 0 {
+		sema = syncutil.NewChanSemaphore(c.MaxGoroutines)
+	} else {
+		sema = syncutil.EmptySemaphore{}
+	}
+
+	var lc netutil.ListenConfig
+	if c.ListenConfig != nil {
+		lc = c.ListenConfig
+	} else {
+		lc, err = defaultListenConfig()
+		if err != nil {
+			// Don't wrap the error, because it's informative enough as is.
+			return nil, err
+		}
+	}
+
 	return &Server{
-		handler:      cmp.Or(conf.Handler, defaultDNSCryptHandler),
-		resolverCert: conf.ResolverCert,
-		providerName: conf.ProviderName,
-		addr:         conf.Addr,
-		logger:       cmp.Or(conf.Logger, slog.Default()),
+		handler:      cmp.Or(c.Handler, defaultDNSCryptHandler),
+		resolverCert: c.ResolverCert,
+		providerName: c.ProviderName,
+		addr:         c.Addr,
+		logger:       cmp.Or(c.Logger, slog.Default()),
 		wg:           &sync.WaitGroup{},
-		udpSize:      cmp.Or(conf.UDPSize, defaultUDPSize),
-		proto:        conf.Proto,
+		sema:         sema,
+		lc:           lc,
+		udpSize:      cmp.Or(c.UDPSize, defaultUDPSize),
+		proto:        c.Proto,
 		tcpConns:     map[net.Conn]struct{}{},
 	}, nil
 }
 
+// defaultListenConfig returns the default listen config for the current
+// environment.  If not set, [netutil.NewListenConfigWithOOB] will be used if it
+// is supported in the current environment, or [netutil.NewListenConfig]
+// otherwise.
+func defaultListenConfig() (lc netutil.ListenConfig, err error) {
+	lc, err = netutil.NewListenConfigWithOOB(nil)
+	if err != nil {
+		if errors.Is(err, errors.ErrUnsupported) {
+			return netutil.NewListenConfig(nil), nil
+		}
+
+		return nil, fmt.Errorf("creating new listen config: %w", err)
+	}
+
+	return lc, nil
+}
+
 // LocalAddr returns the local network address for the given protocol, if known.
 func (s *Server) LocalAddr() (addr net.Addr) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	switch s.proto {
 	case ProtoTCP:
 		if s.tcpListener != nil {
@@ -169,9 +227,9 @@ func (s *Server) Start(ctx context.Context) (err error) {
 
 	switch s.proto {
 	case ProtoTCP:
-		s.tcpListener, err = net.ListenTCP(string(ProtoTCP), net.TCPAddrFromAddrPort(s.addr))
+		s.tcpListener, err = s.lc.Listen(ctx, string(s.proto), s.addr.String())
 	case ProtoUDP:
-		s.udpConn, err = net.ListenUDP(string(ProtoUDP), net.UDPAddrFromAddrPort(s.addr))
+		s.udpConn, err = s.lc.ListenPacket(ctx, string(s.proto), s.addr.String())
 	default:
 		panic(fmt.Errorf(
 			"proto: %w: %q, supported: %q",
@@ -423,6 +481,44 @@ func (s *Server) getCertTXT() (cert string) {
 	certBuf, _ := s.resolverCert.MarshalBinary()
 
 	return packTxtString(certBuf)
+}
+
+// handleConnectionAcceptError handles connection acceptance error properly.  It
+// returns true if the server has stopped.
+func (s *Server) handleConnectionAcceptError(
+	ctx context.Context,
+	orig error,
+	proto Proto,
+) (stopped bool, err error) {
+	err = orig
+
+	if !s.isStarted() {
+		return true, nil
+	}
+
+	if isTimeoutError(err) {
+		return false, nil
+	}
+
+	if isConnClosed(err) {
+		s.logger.InfoContext(ctx, "listener closed, exiting loop", "proto", proto)
+	} else {
+		s.logger.InfoContext(
+			ctx,
+			"got error when reading from listener",
+			"proto", proto,
+			slogutil.KeyError, err,
+		)
+	}
+
+	return true, fmt.Errorf("reading %s message: %w", proto, err)
+}
+
+// isTimeoutError returns true if err is an actual timeout error.
+func isTimeoutError(err error) (ok bool) {
+	var netErr net.Error
+
+	return errors.As(err, &netErr) && netErr.Timeout()
 }
 
 // isConnClosed checks if the error signals a closed server connection.

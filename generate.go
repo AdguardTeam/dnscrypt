@@ -63,6 +63,19 @@ func (rc *ResolverConfig) Validate() (err error) {
 	errs = append(errs, validate.Equal("private_key_len", len(rc.PrivateKey), ed25519.PrivateKeySize*2))
 	// TODO(m.kazantsev):  Consider removing this validation.
 	errs = append(errs, validate.Equal("resolver_secret_len", len(rc.ResolverSk), KeySize*2))
+	errs = append(errs, validate.NotEmpty("provider_name", rc.ProviderName))
+
+	switch rc.ESVersion {
+	case XChacha20Poly1305, XSalsa20Poly1305:
+		// Go on.
+	default:
+		errs = append(errs, fmt.Errorf(
+			"es_version: %w: %q, supported: %q",
+			errors.ErrBadEnumValue,
+			rc.ESVersion,
+			[]CryptoConstruction{XChacha20Poly1305, XSalsa20Poly1305},
+		))
+	}
 
 	return errors.Join(errs...)
 }
